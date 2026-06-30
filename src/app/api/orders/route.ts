@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
-import { SUPPORTED_SYMBOLS } from '@/lib/types'
 import { requireAuth, requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { orderCreateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,33 +41,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const {
-      accountId,
-      symbol,
-      side,
-      orderType,
-      lotSize,
-      price,
-      stopLoss,
-      takeProfit,
-    } = body || {}
-
-    if (!accountId || !symbol || !side || !orderType || !lotSize || price == null) {
-      return NextResponse.json(
-        { error: 'accountId, symbol, side, orderType, lotSize, price are required' },
-        { status: 400 },
-      )
+    const validated = validateBody(orderCreateSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
-
-    if (!SUPPORTED_SYMBOLS.includes(symbol)) {
-      return NextResponse.json({ error: `Unsupported symbol: ${symbol}` }, { status: 400 })
-    }
-    if (side !== 'buy' && side !== 'sell') {
-      return NextResponse.json({ error: 'side must be buy or sell' }, { status: 400 })
-    }
-    if (orderType !== 'limit' && orderType !== 'stop') {
-      return NextResponse.json({ error: 'orderType must be limit or stop' }, { status: 400 })
-    }
+    const { accountId, symbol, side, orderType, lotSize, price, stopLoss, takeProfit } = validated.data
 
     const account = await db.account.findUnique({ where: { id: accountId } })
     if (!account) {

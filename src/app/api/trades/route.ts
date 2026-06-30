@@ -4,11 +4,12 @@ import { logInfo } from '@/lib/logger'
 import { sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
 import { bidAsk } from '@/lib/market'
-import { SUPPORTED_SYMBOLS, SYMBOL_BASE } from '@/lib/types'
+import { SYMBOL_BASE } from '@/lib/types'
 import { bridgeHealth, marketOrder as mt5MarketOrder } from '@/lib/mt5-client'
 import { requireTrader } from '@/lib/auth-server'
 import { enforceTradeOpen } from '@/lib/risk-enforcement'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { tradeCreateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,36 +49,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const {
-      accountId,
-      symbol,
-      side,
-      lotSize,
-      stopLoss,
-      takeProfit,
-      source,
-      trailingStop,
-      trailingPips,
-      comment,
-    } = body || {}
-
-    if (!accountId || !symbol || !side || !lotSize) {
-      return NextResponse.json(
-        { error: 'accountId, symbol, side, lotSize are required' },
-        { status: 400 },
-      )
+    const validated = validateBody(tradeCreateSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
-
-    if (!SUPPORTED_SYMBOLS.includes(symbol)) {
-      return NextResponse.json(
-        { error: `Unsupported symbol: ${symbol}` },
-        { status: 400 },
-      )
-    }
-
-    if (side !== 'buy' && side !== 'sell') {
-      return NextResponse.json({ error: 'side must be buy or sell' }, { status: 400 })
-    }
+    const { accountId, symbol, side, lotSize, stopLoss, takeProfit, source, trailingStop, trailingPips, comment } = validated.data
 
     const account = await db.account.findUnique({ where: { id: accountId } })
     if (!account) {

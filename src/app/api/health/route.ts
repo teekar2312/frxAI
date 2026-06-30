@@ -74,6 +74,46 @@ export async function GET() {
     detail: `${(process.uptime() / 60).toFixed(1)} minutes`,
   }
 
+  // 6. Price feed service check (port 3003)
+  try {
+    const pfStart = Date.now()
+    const pfRes = await fetch('http://localhost:3003/health', { signal: AbortSignal.timeout(3000) })
+    const pfLatency = Date.now() - pfStart
+    checks.priceFeedService = {
+      status: pfRes.ok ? 'ok' : 'error',
+      latency: pfLatency,
+      detail: pfRes.ok ? 'healthy' : `HTTP ${pfRes.status}`,
+    }
+    if (!pfRes.ok) allOk = false
+  } catch (e: any) {
+    checks.priceFeedService = { status: 'error', detail: e?.message || 'unreachable' }
+    // Price feed offline is non-critical — app uses synthetic fallback
+  }
+
+  // 7. SL/TP monitor service check (port 3004)
+  try {
+    const sltpStart = Date.now()
+    const sltpRes = await fetch('http://localhost:3004/health', { signal: AbortSignal.timeout(3000) })
+    const sltpLatency = Date.now() - sltpStart
+    checks.sltpMonitorService = {
+      status: sltpRes.ok ? 'ok' : 'error',
+      latency: sltpLatency,
+      detail: sltpRes.ok ? 'healthy' : `HTTP ${sltpRes.status}`,
+    }
+    if (!sltpRes.ok) allOk = false
+  } catch (e: any) {
+    checks.sltpMonitorService = { status: 'error', detail: e?.message || 'unreachable' }
+    // SL/TP monitor offline means manual SL/TP monitoring only
+  }
+
+  // Summary of which mini-services are running
+  const miniServices = ['priceFeedService', 'sltpMonitorService']
+  const miniServicesRunning = miniServices.filter(k => checks[k]?.status === 'ok').length
+  checks.summary = {
+    status: 'ok' as const,
+    detail: `Main: ok | Mini-services: ${miniServicesRunning}/${miniServices.length} running`,
+  }
+
   return NextResponse.json(
     {
       status: allOk ? 'healthy' : 'degraded',

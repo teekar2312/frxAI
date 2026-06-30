@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { alertCreateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +19,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}))
-    const { symbol, condition, price, notifyEmail, message } = body || {}
-    if (!symbol || !condition || price === undefined || price === null) {
-      return NextResponse.json({ error: 'symbol, condition, price are required' }, { status: 400 })
+    const validated = validateBody(alertCreateSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
+    const { symbol, condition, price, notifyEmail, message } = validated.data
     const alert = await db.alert.create({
       data: {
         symbol,

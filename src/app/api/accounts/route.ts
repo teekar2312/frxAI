@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { accountCreateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,21 +17,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const {
-      name,
-      broker,
-      server,
-      login,
-      accountType,
-      currency,
-      leverage,
-      balance,
-      isDefault,
-    } = body || {}
-
-    if (!name || !login) {
-      return NextResponse.json({ error: 'name and login are required' }, { status: 400 })
+    const validated = validateBody(accountCreateSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
+    const { name, broker, server, login, accountType, currency, leverage, balance, isDefault } = validated.data
 
     // If default, unset others first
     if (isDefault) {
