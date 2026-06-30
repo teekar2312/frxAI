@@ -58,5 +58,28 @@ test
 prompt
 
 server.log
+
 # Skills directory
 /skills/
+
+# Development artifacts (should never be committed)
+worklog.md
+agent-ctx/
+tool-results/
+download/
+
+# Screenshots belong in docs/, not root
+/*.png
+
+# IDE
+.vscode/
+
+# Z-AI internal
+.zscripts/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Mini-services node_modules
+mini-services/*/node_modules/

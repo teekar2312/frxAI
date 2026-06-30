@@ -1,6 +1,7 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.2.0",
+  "name": "frxai",
+  "version": "1.0.0",
+  "description": "AI-powered Forex trading dashboard with technical analysis, news sentiment, backtesting, and MT5 integration",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
