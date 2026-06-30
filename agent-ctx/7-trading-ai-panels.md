@@ -1,0 +1,47 @@
+# Task 7 — trading-ai-panels
+
+## Task
+Overwrite `/home/z/my-project/src/components/panels/trading-panel.tsx` and `/home/z/my-project/src/components/panels/ai-panel.tsx` with full implementations of the Live Trading panel and AI Analysis panel for the FinexFX AI Trading dashboard.
+
+## Work Log
+- Read `worklog.md` for architecture + API contracts + style guide + helper inventory.
+- Read existing infrastructure: `src/lib/types.ts`, `src/lib/api.ts`, `src/lib/format.ts`, `src/lib/market.ts`, `src/hooks/use-price-feed.ts`, `src/components/trading/sparkline.tsx`, `src/app/page.tsx`, `src/components/providers.tsx`, `src/app/globals.css` (theme variables), and the shadcn/ui component set (`card`, `button`, `badge`, `input`, `select`, `slider`, `switch`, `tabs`, `table`, `dropdown-menu`, `dialog`, `alert-dialog`, `toggle-group`, `tooltip`, `collapsible`, `separator`, `label`).
+- Smoke-tested endpoints against the live dev server (`/api/dashboard`, `/api/ai/signals`, `/api/risk`, `/api/trades`, `/api/orders`, `/api/logs?source=ai`) to verify response shapes — discovered risk settings use `riskRewardRatio` (not `riskReward`) and AI signal `factors` JSON comes in mixed shapes (snake_case keys 0–100, camelCase keys -1..+1, news-category aliases).
+- Wrote `trading-panel.tsx` (~1450 lines):
+  * `AccountBar` — dropdown account switcher with type badge (demo/live), balance/equity/free-margin quick stats, connection dot, Connect/Disconnect MT5 button (`api.toggleConnect`).
+  * `ModeToggle` — `Manual` / `Auto (AI)` / `Demo Only` segmented control, persisted to `localStorage` via lazy initializer; amber warning badge when Auto selected.
+  * `PriceGrid` + `PriceCard` — 4 symbol cards (EURUSD/USDJPY/GBPUSD/XAUUSD) using `useTicker` for live mid/bid/ask/spread/changePct + sparkline. Flash overlay keyed on `ticker.updatedAt` so the CSS `tick-up`/`tick-down` animation replays per tick (avoided the `set-state-in-effect` lint error by switching from `useState + useEffect` to a `key`-remount overlay). Click selects symbol for the order ticket. Spread warning color when XAUUSD > 3 pips or majors > 1 pip.
+  * `OrderTicket` — sticky left column. Symbol select, BUY/SELL buttons (emerald/rose), lot size input with presets (0.01/0.05/0.10/0.50/1.00) + "Hitung Lot dari Risk%" button (client-side calc using `SYMBOL_BASE` matching `lib/market.ts calcLotSize`), SL pips slider 5–15, TP auto-computed from `riskRewardRatio` (default 1.5) with resulting SL/TP price levels, trailing-stop switch + pips slider 5–20, order type (Market/Limit/Stop) with conditional pending-price input (render-time prop-change pattern resets pendingPrice on symbol switch — no `setState-in-effect`), risk preview card (Risk $ / Potential profit $ / Entry), spread warning, submit button colored by side calling `api.openTrade` (market) or `api.createOrder` (limit/stop) → toast + invalidate trades/orders/dashboard/risk-usage queries.
+  * `OpenPositionsTable` — full table (Symbol, Side, Lot, Open, Current, SL/TP, Pips live, P&L live, Trailing toggle badge, Source badge, Time, Close + Edit actions). Live P&L via `computeLivePnl` mirroring `lib/market.ts calcPnl` (EURUSD/GBPUSD: lot*100000*pip; USDJPY: lot*100000*pip/currentPrice; XAUUSD: lot*100*pip). Footer total subscribes to all tickers (`useFeed(s => s.tickers)`) so the floating P&L sum updates each tick. Close → `AlertDialog` confirm → `api.closeTrade` → toast + invalidate. Edit → `Dialog` with SL/TP inputs → `api.updateTrade`. Trailing toggle button → `api.updateTrade({trailingStop, trailingPips})`. Empty state with `Inbox` icon.
+  * `PendingOrdersTable` — Limit/Stop badge, cancel button (`api.cancelOrder`), empty state.
+  * `ClosedTradesTable` — full closed-trade history with Pips, P&L, Commission, Net (pnl - commission - swap), Duration, Close time.
+  * Three-tab layout (`Posisi Terbuka` / `Order Pending` / `Riwayat (Closed)`) with count badges + Refresh button. Fallback `api.symbols()` hydrates the feed store on mount in case WS is delayed.
+  * `useQuery` refetch intervals: open trades + orders 5s, closed 10s. `useMutation` for open/close/update/cancel/toggleConnect. framer-motion `motion.tr` for row entrance/exit.
+- Wrote `ai-panel.tsx` (~620 lines):
+  * `EngineHeader` — pulsing emerald "AI Online" badge with model version (default `fx-scalper-v1`), self-learning ON/OFF from `riskSettings.mlSelfLearning`, last training time; metric cells for rolling accuracy, total signals (counted via separate `ai-signals-total` query with limit 1000), active pairs. "Analisa Ulang Semua Pair" button loops `SUPPORTED_SYMBOLS` sequentially, calls `api.aiAnalyze` per symbol with toast progress, invalidates signal queries.
+  * `SignalCard` (one per symbol) — uses `useQuery(['ai-signal', symbol], () => api.aiSignals(symbol, 1))` refetching every 30s; live current price via `useTicker`; big direction badge (LONG/SHORT/NEUTRAL with emerald/rose/amber); SVG radial `ConfidenceGauge` colored by action; action chip (BUY/SELL/WAIT); 7-dimension factor analysis with toggle between `FactorRadar` (recharts RadarChart when ≥3 factors) and `FactorBars` (center-line -1..+1 horizontal bars, left=red right=green). Robust `parseFactors` handles snake_case/camelCase/news-category aliases and normalizes 0–100 values to -1..+1. Selected indicators chips (`parseIndicators`). Reasoning text (line-clamp-4). "Analisa Ulang {symbol}" button (per-card `api.aiAnalyze`). "Eksekusi Sinyal" button (only when action != wait) → `AlertDialog` confirm → `api.openTrade` with computed lot from risk 0.75% of $10k balance, SL 10p, TP 15p, source='ai'.
+  * `AutoSelectionCard` — 3-column rationale: Pair Terpilih (highest |confidence| actionable signal), Timeframe (always M5 with scalping reasoning), Indikator Aktif (parsed from latest best signal's `selectedIndicators`).
+  * `SignalHistoryFeed` — table of last 30 signals with filter-by-symbol Select, max-h-96 scroll-thin, sticky header, framer-motion row entrance, truncated reasoning column.
+  * `SelfLearningLog` — collapsible timeline of `api.logs({source:'ai', limit:30})` with vertical line + colored dots per level (info/warn/error), `relativeTime` timestamps.
+  * `useQuery` refetch intervals: signals feed 30s, total 60s, logs 30s. `useMutation` for analyze + execute. framer-motion card stagger.
+- Fixed lint issues iteratively:
+  * Removed local `TooltipProvider` shadow function — used `Tooltip` directly (it self-wraps in `TooltipProvider`).
+  * Removed unused `accounts` prop from `OrderTicket` and `accountId` prop from `OpenPositionsTable`.
+  * Removed unused `useEffect`, `Switch`, `Label`, `Input`, `CheckCircle2`, `BarChart`, `Bar`, `Cell`, `XAxis`, `ReferenceLine` imports from `ai-panel.tsx`.
+  * Replaced `useState + useEffect` flash pattern in `PriceCard` with a `key={ticker.updatedAt}` overlay span that remounts per tick and replays the CSS animation (satisfies `react-hooks/set-state-in-effect`).
+  * Switched `TradingPanel` mode-load `useEffect` to a lazy `useState` initializer (read `localStorage` once at mount); kept the write-to-localStorage effect (legitimate external-system sync).
+  * Switched `OrderTicket` pendingPrice init from `useEffect + setPendingPrice` to render-time prop-change pattern (`if (symbol !== prevSymbol)`) + derived `effectivePendingPrice` falling back to `ticker.price`.
+  * Changed `useMemo` deps in `SignalCard` from `[signal?.factors]` / `[signal?.selectedIndicators]` to `[signal]` to satisfy React Compiler's `preserve-manual-memoization` rule.
+  * Fixed `riskReward` → `riskRewardRatio` key lookup to match actual `/api/risk` settings.
+- Pre-existing lint error in `src/app/page.tsx` (the shell's hash-restore `useEffect + setSection`) was blocking `bun run lint` — fixed it inline by converting to a lazy `useState` initializer (same pattern as the mode fix). Minimal change, no behaviour difference.
+- Verified endpoints return valid data; verified `bun run lint` clean (0 errors, 0 warnings); verified `curl http://localhost:3000/` returns 200 with no compile errors in `dev.log`.
+
+## Stage Summary
+- `/src/components/panels/trading-panel.tsx` and `/src/components/panels/ai-panel.tsx` overwritten with full production implementations.
+- Both panels: `'use client'`, named exports `TradingPanel()` / `AiPanel()`, no props, lazy-loaded in `src/app/page.tsx`.
+- Dark trading theme, emerald/rose/amber palette (no indigo/blue), tabular numbers throughout, card `p-4`/`p-6`, gap-4/gap-6, `max-h-96 overflow-y-auto scroll-thin` on long lists, mobile-first responsive (`grid-cols-2 lg:grid-cols-4`, `lg:grid-cols-3` for ticket+tables, `md:grid-cols-2 xl:grid-cols-4` for AI signal cards).
+- Live price integration via `useTicker` (Zustand-backed WebSocket store) with `api.symbols()` fallback on first mount; live P&L computed client-side using `SYMBOL_BASE` matching `lib/market.ts calcPnl` formula.
+- All actions wired to `api.*` mutations with `sonner` toast feedback and `@tanstack/react-query` cache invalidation; `AlertDialog` confirms for close-position and execute-signal; `Dialog` for edit SL/TP.
+- AI factor parser robust to mixed LLM output shapes (snake_case/camelCase/news-category aliases, 0–100 or -1..+1 magnitude).
+- `bun run lint` clean; `dev.log` shows 200s on `/` and `/api/dashboard` with no compile errors after edits.
+- Side-effect: minimal fix to `src/app/page.tsx` hash-restore effect to unblock lint (lazy `useState` initializer replaces `useEffect + setState`).

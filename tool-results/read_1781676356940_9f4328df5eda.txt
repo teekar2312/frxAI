@@ -1,0 +1,622 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo } from 'react'
+     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→import { motion, AnimatePresence } from 'framer-motion'
+     6→import { toast } from 'sonner'
+     7→import {
+     8→  RefreshCw, Newspaper, TrendingUp, TrendingDown, Minus,
+     9→  ExternalLink, Clock, Zap, Activity, Filter, Calendar, Radio,
+    10→} from 'lucide-react'
+    11→import { api } from '@/lib/api'
+    12→import type { NewsItem, NewsCategory } from '@/lib/types'
+    13→import { NEWS_CATEGORIES, SUPPORTED_SYMBOLS, SYMBOL_LABEL } from '@/lib/types'
+    14→import { relativeTime } from '@/lib/format'
+    15→import { cn } from '@/lib/utils'
+    16→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    17→import { Button } from '@/components/ui/button'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { ScrollArea } from '@/components/ui/scroll-area'
+    20→import {
+    21→  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+    22→} from '@/components/ui/sheet'
+    23→import { Skeleton } from '@/components/ui/skeleton'
+    24→
+    25→type SourceFilter = 'all' | 'finnhub' | 'marketaux' | 'breaking'
+    26→type ImpactFilter = 'all' | 'high' | 'medium' | 'low'
+    27→
+    28→const CATEGORY_COLOR: Record<NewsCategory, string> = {
+    29→  central_bank: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
+    30→  nfp: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+    31→  cpi: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    32→  ppi: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    33→  gdp: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    34→  unemployment: 'border-orange-500/40 bg-orange-500/10 text-orange-300',
+    35→  retail: 'border-cyan-600/40 bg-cyan-600/10 text-cyan-300',
+    36→  pmi: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    37→  geopolitical: 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+    38→  fiscal: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
+    39→  commodity: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+    40→  sentiment: 'border-cyan-600/40 bg-cyan-600/10 text-cyan-300',
+    41→  breaking: 'border-rose-500/60 bg-rose-500/15 text-rose-200',
+    42→}
+    43→
+    44→const SOURCE_COLOR: Record<string, string> = {
+    45→  finnhub: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+    46→  marketaux: 'border-cyan-600/40 bg-cyan-600/10 text-cyan-300',
+    47→}
+    48→const SOURCE_LABEL: Record<string, string> = {
+    49→  finnhub: 'Finnhub',
+    50→  marketaux: 'MARKETAUX',
+    51→}
+    52→const IMPACT_DOT: Record<NewsItem['impact'], string> = {
+    53→  high: 'bg-rose-500 live-dot',
+    54→  medium: 'bg-amber-400',
+    55→  low: 'bg-zinc-500',
+    56→}
+    57→const IMPACT_LABEL: Record<NewsItem['impact'], string> = {
+    58→  high: 'High',
+    59→  medium: 'Medium',
+    60→  low: 'Low',
+    61→}
+    62→
+    63→const lineClamp = (n: number): React.CSSProperties => ({
+    64→  display: '-webkit-box',
+    65→  WebkitLineClamp: n,
+    66→  WebkitBoxOrient: 'vertical',
+    67→  overflow: 'hidden',
+    68→})
+    69→
+    70→function parseSymbols(s: string): string[] {
+    71→  return s.split(',').map((x) => x.trim()).filter(Boolean)
+    72→}
+    73→
+    74→const SOURCE_FILTERS: { value: SourceFilter; label: string }[] = [
+    75→  { value: 'all', label: 'Semua' },
+    76→  { value: 'finnhub', label: 'Finnhub' },
+    77→  { value: 'marketaux', label: 'MARKETAUX' },
+    78→  { value: 'breaking', label: 'Breaking' },
+    79→]
+    80→const IMPACT_FILTERS: { value: ImpactFilter; label: string }[] = [
+    81→  { value: 'all', label: 'Semua' },
+    82→  { value: 'high', label: 'High' },
+    83→  { value: 'medium', label: 'Medium' },
+    84→  { value: 'low', label: 'Low' },
+    85→]
+    86→
+    87→function SentimentIcon({ s }: { s: NewsItem['sentiment'] }) {
+    88→  if (s === 'bullish') return <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
+    89→  if (s === 'bearish') return <TrendingDown className="h-3.5 w-3.5 text-rose-400" />
+    90→  return <Minus className="h-3.5 w-3.5 text-amber-400" />
+    91→}
+    92→
+    93→function SentimentLabel({ s }: { s: NewsItem['sentiment'] }) {
+    94→  if (s === 'bullish') return <span className="text-emerald-400">Bullish &#9650;</span>
+    95→  if (s === 'bearish') return <span className="text-rose-400">Bearish &#9660;</span>
+    96→  return <span className="text-amber-400">Neutral &#9670;</span>
+    97→}
+    98→
+    99→export function NewsPanel() {
+   100→  const qc = useQueryClient()
+   101→  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
+   102→  const [categoryFilter, setCategoryFilter] = useState<NewsCategory | 'all'>('all')
+   103→  const [impactFilter, setImpactFilter] = useState<ImpactFilter>('all')
+   104→  const [selected, setSelected] = useState<NewsItem | null>(null)
+   105→
+   106→  const newsQ = useQuery({
+   107→    queryKey: ['news'],
+   108→    queryFn: () => api.news({ limit: 100 }),
+   109→    refetchInterval: 60_000,
+   110→  })
+   111→  const configQ = useQuery({
+   112→    queryKey: ['system-config'],
+   113→    queryFn: () => api.systemConfig(),
+   114→    staleTime: 5 * 60_000,
+   115→  })
+   116→
+   117→  const refreshMut = useMutation({
+   118→    mutationFn: () => api.refreshNews(),
+   119→    onSuccess: (data) => {
+   120→      toast.success(`${data.news.length} berita baru disintesis`)
+   121→      qc.invalidateQueries({ queryKey: ['news'] })
+   122→    },
+   123→    onError: () => toast.error('Gagal menyegarkan berita'),
+   124→  })
+   125→
+   126→  const allNews = newsQ.data?.news ?? []
+   127→  const refreshMinutes = Number(configQ.data?.config?.newsRefreshMinutes ?? 15)
+   128→
+   129→  const breakingItems = useMemo(
+   130→    () => allNews.filter((n) => n.category === 'breaking'),
+   131→    [allNews],
+   132→  )
+   133→
+   134→  const filtered = useMemo(() => {
+   135→    return allNews.filter((n) => {
+   136→      if (sourceFilter === 'finnhub' && n.source !== 'finnhub') return false
+   137→      if (sourceFilter === 'marketaux' && n.source !== 'marketaux') return false
+   138→      if (sourceFilter === 'breaking' && n.category !== 'breaking') return false
+   139→      if (categoryFilter !== 'all' && n.category !== categoryFilter) return false
+   140→      if (impactFilter !== 'all' && n.impact !== impactFilter) return false
+   141→      return true
+   142→    })
+   143→  }, [allNews, sourceFilter, categoryFilter, impactFilter])
+   144→
+   145→  const sentiment = useMemo(() => {
+   146→    const b = filtered.filter((n) => n.sentiment === 'bullish').length
+   147→    const r = filtered.filter((n) => n.sentiment === 'bearish').length
+   148→    const u = filtered.filter((n) => n.sentiment === 'neutral').length
+   149→    const total = b + r + u || 1
+   150→    return {
+   151→      bull: b,
+   152→      bear: r,
+   153→      neutral: u,
+   154→      total: b + r + u,
+   155→      bullPct: (b / total) * 100,
+   156→      bearPct: (r / total) * 100,
+   157→      neuPct: (u / total) * 100,
+   158→    }
+   159→  }, [filtered])
+   160→
+   161→  const perSymbol = useMemo(() => {
+   162→    return SUPPORTED_SYMBOLS.map((sym) => {
+   163→      const items = filtered.filter((n) => parseSymbols(n.symbols).includes(sym))
+   164→      const b = items.filter((n) => n.sentiment === 'bullish').length
+   165→      const r = items.filter((n) => n.sentiment === 'bearish').length
+   166→      const u = items.filter((n) => n.sentiment === 'neutral').length
+   167→      return { symbol: sym, bull: b, bear: r, neutral: u, total: items.length, net: b - r }
+   168→    })
+   169→  }, [filtered])
+   170→
+   171→  const calendar = useMemo(() => {
+   172→    const high = filtered.filter((n) => n.impact === 'high')
+   173→    const now = new Date()
+   174→    const groups: { label: string; items: NewsItem[] }[] = []
+   175→    for (let i = 0; i < 3; i++) {
+   176→      const d = new Date(now)
+   177→      d.setDate(now.getDate() - i)
+   178→      const dayStart = new Date(d); dayStart.setHours(0, 0, 0, 0)
+   179→      const dayEnd = new Date(d); dayEnd.setHours(23, 59, 59, 999)
+   180→      const items = high.filter((n) => {
+   181→        const p = new Date(n.publishedAt)
+   182→        return p >= dayStart && p <= dayEnd
+   183→      })
+   184→      const label = i === 0 ? 'Hari ini' : i === 1 ? 'Kemarin' : '2 hari lalu'
+   185→      if (items.length) groups.push({ label, items })
+   186→    }
+   187→    return groups
+   188→  }, [filtered])
+   189→
+   190→  const latestBreaking = breakingItems[0]
+   191→  const isLoading = newsQ.isLoading
+   192→  const resetFilters = () => {
+   193→    setSourceFilter('all'); setCategoryFilter('all'); setImpactFilter('all')
+   194→  }
+   195→
+   196→  return (
+   197→    <div className="flex flex-col gap-4 p-4 md:p-6">
+   198→      {/* Header bar */}
+   199→      <div className="flex flex-col gap-3">
+   200→        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+   201→          <div className="flex items-center gap-3">
+   202→            <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10">
+   203→              <Newspaper className="h-5 w-5 text-emerald-400" />
+   204→            </div>
+   205→            <div>
+   206→              <h2 className="text-lg font-bold tracking-tight">News Intelligence — Finnhub + MARKETAUX</h2>
+   207→              <p className="text-xs text-muted-foreground">
+   208→                {allNews.length} berita · {filtered.length} terfilter · 7 dimensi analisa + breaking
+   209→              </p>
+   210→            </div>
+   211→          </div>
+   212→          <div className="flex flex-wrap items-center gap-2">
+   213→            <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
+   214→              <Radio className="h-3 w-3 text-emerald-400 live-dot" />
+   215→              Auto-refresh {refreshMinutes}m
+   216→            </div>
+   217→            <Button
+   218→              size="sm"
+   219→              variant="outline"
+   220→              onClick={() => refreshMut.mutate()}
+   221→              disabled={refreshMut.isPending}
+   222→              className="gap-1.5"
+   223→            >
+   224→              <RefreshCw className={cn('h-3.5 w-3.5', refreshMut.isPending && 'animate-spin')} />
+   225→              {refreshMut.isPending ? 'Menyegarkan…' : 'Refresh News'}
+   226→            </Button>
+   227→          </div>
+   228→        </div>
+   229→
+   230→        {/* Source filter chips */}
+   231→        <div className="flex flex-wrap items-center gap-2">
+   232→          <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Sumber:</span>
+   233→          {SOURCE_FILTERS.map((f) => (
+   234→            <button
+   235→              key={f.value}
+   236→              onClick={() => setSourceFilter(f.value)}
+   237→              className={cn(
+   238→                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+   239→                sourceFilter === f.value
+   240→                  ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+   241→                  : 'border-border bg-muted/40 text-muted-foreground hover:bg-muted',
+   242→              )}
+   243→            >
+   244→              {f.label}
+   245→            </button>
+   246→          ))}
+   247→        </div>
+   248→      </div>
+   249→
+   250→      {/* Breaking news banner */}
+   251→      <AnimatePresence>
+   252→        {latestBreaking && (
+   253→          <motion.div
+   254→            key={latestBreaking.id}
+   255→            initial={{ opacity: 0, y: -10 }}
+   256→            animate={{ opacity: 1, y: 0 }}
+   257→            exit={{ opacity: 0 }}
+   258→          >
+   259→            <Card
+   260→              className="cursor-pointer border-l-4 border-l-rose-500 bg-rose-500/[0.06] py-3 transition-colors hover:bg-rose-500/[0.1]"
+   261→              onClick={() => setSelected(latestBreaking)}
+   262→            >
+   263→              <CardContent className="flex flex-col gap-2 px-4 py-0 md:flex-row md:items-center md:gap-4">
+   264→                <Badge className="border-rose-500/60 bg-rose-500/20 text-rose-200 live-dot gap-1">
+   265→                  <Zap className="h-3 w-3" /> BREAKING
+   266→                </Badge>
+   267→                <div className="min-w-0 flex-1">
+   268→                  <p className="truncate text-sm font-semibold">{latestBreaking.title}</p>
+   269→                  <p className="truncate text-xs text-muted-foreground">{latestBreaking.summary}</p>
+   270→                </div>
+   271→                <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+   272→                  <div className="flex flex-wrap gap-1">
+   273→                    {parseSymbols(latestBreaking.symbols).slice(0, 3).map((s) => (
+   274→                      <span key={s} className="rounded bg-muted/60 px-1.5 py-0.5 font-mono">{s}</span>
+   275→                    ))}
+   276→                  </div>
+   277→                  <span className="whitespace-nowrap tabular">{relativeTime(latestBreaking.publishedAt)}</span>
+   278→                </div>
+   279→              </CardContent>
+   280→            </Card>
+   281→          </motion.div>
+   282→        )}
+   283→      </AnimatePresence>
+   284→
+   285→      {/* Sentiment summary */}
+   286→      <Card>
+   287→        <CardHeader className="pb-2">
+   288→          <CardTitle className="flex items-center justify-between text-sm">
+   289→            <span className="flex items-center gap-2">
+   290→              <Activity className="h-4 w-4 text-emerald-400" />
+   291→              Sentimen Pasar — {filtered.length} berita terfilter
+   292→            </span>
+   293→            <span className="text-[11px] text-muted-foreground tabular">
+   294→              {sentiment.bullPct.toFixed(0)}% Bullish · {sentiment.bearPct.toFixed(0)}% Bearish · {sentiment.neuPct.toFixed(0)}% Neutral
+   295→            </span>
+   296→          </CardTitle>
+   297→        </CardHeader>
+   298→        <CardContent className="space-y-3">
+   299→          <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+   300→            <div className="bg-emerald-500 transition-all" style={{ width: `${sentiment.bullPct}%` }} />
+   301→            <div className="bg-rose-500 transition-all" style={{ width: `${sentiment.bearPct}%` }} />
+   302→            <div className="bg-amber-400 transition-all" style={{ width: `${sentiment.neuPct}%` }} />
+   303→          </div>
+   304→          <div className="grid grid-cols-3 gap-2 text-xs">
+   305→            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+   306→              <div className="flex items-center gap-1 text-emerald-400">
+   307→                <TrendingUp className="h-3.5 w-3.5" /> Bullish
+   308→              </div>
+   309→              <div className="mt-1 font-mono text-lg font-semibold text-emerald-300 tabular">
+   310→                {sentiment.bull}{' '}
+   311→                <span className="text-[10px] text-muted-foreground">({sentiment.bullPct.toFixed(0)}%)</span>
+   312→              </div>
+   313→            </div>
+   314→            <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-2">
+   315→              <div className="flex items-center gap-1 text-rose-400">
+   316→                <TrendingDown className="h-3.5 w-3.5" /> Bearish
+   317→              </div>
+   318→              <div className="mt-1 font-mono text-lg font-semibold text-rose-300 tabular">
+   319→                {sentiment.bear}{' '}
+   320→                <span className="text-[10px] text-muted-foreground">({sentiment.bearPct.toFixed(0)}%)</span>
+   321→              </div>
+   322→            </div>
+   323→            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+   324→              <div className="flex items-center gap-1 text-amber-400">
+   325→                <Minus className="h-3.5 w-3.5" /> Neutral
+   326→              </div>
+   327→              <div className="mt-1 font-mono text-lg font-semibold text-amber-300 tabular">
+   328→                {sentiment.neutral}{' '}
+   329→                <span className="text-[10px] text-muted-foreground">({sentiment.neuPct.toFixed(0)}%)</span>
+   330→              </div>
+   331→            </div>
+   332→          </div>
+   333→        </CardContent>
+   334→      </Card>
+   335→
+   336→      {/* Main grid: filters + feed */}
+   337→      <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+   338→        {/* Sidebar filters */}
+   339→        <div className="flex flex-col gap-4">
+   340→          <Card>
+   341→            <CardHeader className="pb-2">
+   342→              <CardTitle className="flex items-center gap-2 text-sm">
+   343→                <Filter className="h-4 w-4 text-emerald-400" /> Kategori
+   344→              </CardTitle>
+   345→            </CardHeader>
+   346→            <CardContent className="flex flex-wrap gap-1.5">
+   347→              <button
+   348→                onClick={() => setCategoryFilter('all')}
+   349→                className={cn(
+   350→                  'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+   351→                  categoryFilter === 'all'
+   352→                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
+   353→                    : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted',
+   354→                )}
+   355→              >
+   356→                Semua
+   357→              </button>
+   358→              {NEWS_CATEGORIES.map((c) => (
+   359→                <button
+   360→                  key={c.value}
+   361→                  onClick={() => setCategoryFilter(c.value)}
+   362→                  className={cn(
+   363→                    'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+   364→                    categoryFilter === c.value
+   365→                      ? CATEGORY_COLOR[c.value]
+   366→                      : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted',
+   367→                  )}
+   368→                >
+   369→                  {c.label}
+   370→                </button>
+   371→              ))}
+   372→            </CardContent>
+   373→          </Card>
+   374→
+   375→          <Card>
+   376→            <CardHeader className="pb-2">
+   377→              <CardTitle className="flex items-center gap-2 text-sm">
+   378→                <Zap className="h-4 w-4 text-amber-400" /> Impact
+   379→              </CardTitle>
+   380→            </CardHeader>
+   381→            <CardContent className="flex flex-wrap gap-1.5">
+   382→              {IMPACT_FILTERS.map((f) => (
+   383→                <button
+   384→                  key={f.value}
+   385→                  onClick={() => setImpactFilter(f.value)}
+   386→                  className={cn(
+   387→                    'rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors',
+   388→                    impactFilter === f.value
+   389→                      ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+   390→                      : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted',
+   391→                  )}
+   392→                >
+   393→                  {f.label}
+   394→                </button>
+   395→              ))}
+   396→            </CardContent>
+   397→          </Card>
+   398→
+   399→          {/* Per-symbol sentiment */}
+   400→          <Card>
+   401→            <CardHeader className="pb-2">
+   402→              <CardTitle className="text-sm">Sentimen per Pair</CardTitle>
+   403→            </CardHeader>
+   404→            <CardContent className="max-h-80 space-y-2 overflow-y-auto scroll-thin">
+   405→              {perSymbol.map((p) => {
+   406→                const total = p.total || 1
+   407→                return (
+   408→                  <div key={p.symbol} className="rounded-md border border-border bg-muted/30 p-2">
+   409→                    <div className="flex items-center justify-between text-xs">
+   410→                      <span className="font-mono font-semibold">{SYMBOL_LABEL[p.symbol]}</span>
+   411→                      <span
+   412→                        className={cn(
+   413→                          'font-mono text-[11px] tabular',
+   414→                          p.net > 0 ? 'text-emerald-400' : p.net < 0 ? 'text-rose-400' : 'text-muted-foreground',
+   415→                        )}
+   416→                      >
+   417→                        net {p.net > 0 ? '+' : ''}
+   418→                        {p.net}
+   419→                      </span>
+   420→                    </div>
+   421→                    <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-muted">
+   422→                      <div className="bg-emerald-500" style={{ width: `${(p.bull / total) * 100}%` }} />
+   423→                      <div className="bg-rose-500" style={{ width: `${(p.bear / total) * 100}%` }} />
+   424→                      <div className="bg-amber-400" style={{ width: `${(p.neutral / total) * 100}%` }} />
+   425→                    </div>
+   426→                    <div className="mt-1 flex justify-between text-[10px] tabular">
+   427→                      <span className="text-emerald-400">&#9650;{p.bull}</span>
+   428→                      <span className="text-rose-400">&#9660;{p.bear}</span>
+   429→                      <span className="text-amber-400">&#9670;{p.neutral}</span>
+   430→                    </div>
+   431→                  </div>
+   432→                )
+   433→              })}
+   434→            </CardContent>
+   435→          </Card>
+   436→        </div>
+   437→
+   438→        {/* News feed */}
+   439→        <Card className="flex flex-col">
+   440→          <CardHeader className="pb-2">
+   441→            <CardTitle className="flex items-center justify-between text-sm">
+   442→              <span className="flex items-center gap-2">
+   443→                <Newspaper className="h-4 w-4 text-emerald-400" /> News Feed
+   444→              </span>
+   445→              <span className="text-[11px] text-muted-foreground tabular">{filtered.length} items</span>
+   446→            </CardTitle>
+   447→          </CardHeader>
+   448→          <CardContent className="p-0">
+   449→            {isLoading ? (
+   450→              <div className="space-y-3 p-4">
+   451→                {Array.from({ length: 5 }).map((_, i) => (
+   452→                  <Skeleton key={i} className="h-24" />
+   453→                ))}
+   454→              </div>
+   455→            ) : filtered.length === 0 ? (
+   456→              <div className="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
+   457→                <Newspaper className="h-8 w-8 text-muted-foreground/50" />
+   458→                <p className="text-sm text-muted-foreground">Tidak ada berita sesuai filter.</p>
+   459→                <Button variant="outline" size="sm" onClick={resetFilters}>
+   460→                  Reset filter
+   461→                </Button>
+   462→              </div>
+   463→            ) : (
+   464→              <ScrollArea className="max-h-[600px]">
+   465→                <div className="divide-y divide-border">
+   466→                  {filtered.map((n, i) => (
+   467→                    <NewsRow key={n.id} item={n} index={i} onClick={() => setSelected(n)} />
+   468→                  ))}
+   469→                </div>
+   470→              </ScrollArea>
+   471→            )}
+   472→          </CardContent>
+   473→        </Card>
+   474→      </div>
+   475→
+   476→      {/* Impact calendar */}
+   477→      {calendar.length > 0 && (
+   478→        <Card>
+   479→          <CardHeader className="pb-2">
+   480→            <CardTitle className="flex items-center gap-2 text-sm">
+   481→              <Calendar className="h-4 w-4 text-amber-400" /> Impact Calendar — High-impact timeline
+   482→            </CardTitle>
+   483→          </CardHeader>
+   484→          <CardContent className="grid gap-4 md:grid-cols-3">
+   485→            {calendar.map((g) => (
+   486→              <div key={g.label} className="rounded-lg border border-border bg-muted/20 p-3">
+   487→                <div className="mb-2 flex items-center justify-between">
+   488→                  <span className="text-xs font-semibold uppercase tracking-wider text-amber-300">{g.label}</span>
+   489→                  <Badge variant="secondary" className="text-[10px] tabular">{g.items.length} high</Badge>
+   490→                </div>
+   491→                <div className="max-h-48 space-y-2 overflow-y-auto scroll-thin">
+   492→                  {g.items.map((n) => (
+   493→                    <div key={n.id} className="rounded-md border border-border bg-background/40 p-2">
+   494→                      <div className="flex items-start gap-2">
+   495→                        <span className={cn('mt-1 h-2 w-2 shrink-0 rounded-full', IMPACT_DOT[n.impact])} />
+   496→                        <button
+   497→                          onClick={() => setSelected(n)}
+   498→                          className="min-w-0 flex-1 text-left text-xs font-medium hover:text-emerald-300"
+   499→                          style={lineClamp(2)}
+   500→                        >
+   501→                          {n.title}
+   502→                        </button>
+   503→                      </div>
+   504→                      <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+   505→                        <span className="tabular">{relativeTime(n.publishedAt)}</span>
+   506→                        <SentimentIcon s={n.sentiment} />
+   507→                      </div>
+   508→                    </div>
+   509→                  ))}
+   510→                </div>
+   511→              </div>
+   512→            ))}
+   513→          </CardContent>
+   514→        </Card>
+   515→      )}
+   516→
+   517→      {/* News detail sheet */}
+   518→      <Sheet open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+   519→        <SheetContent side="right" className="w-full overflow-y-auto scroll-thin sm:max-w-lg">
+   520→          {selected && (
+   521→            <>
+   522→              <SheetHeader className="gap-3">
+   523→                <div className="flex flex-wrap items-center gap-2 pr-6">
+   524→                  <span className={cn('h-2.5 w-2.5 rounded-full', IMPACT_DOT[selected.impact])} />
+   525→                  <Badge variant="outline" className={CATEGORY_COLOR[selected.category]}>
+   526→                    {NEWS_CATEGORIES.find((c) => c.value === selected.category)?.label ?? selected.category}
+   527→                  </Badge>
+   528→                  <Badge variant="outline" className={SOURCE_COLOR[selected.source] ?? ''}>
+   529→                    {SOURCE_LABEL[selected.source] ?? selected.source}
+   530→                  </Badge>
+   531→                  <Badge variant="outline" className="capitalize">{IMPACT_LABEL[selected.impact]} Impact</Badge>
+   532→                </div>
+   533→                <SheetTitle className="text-left text-base leading-snug">{selected.title}</SheetTitle>
+   534→                <SheetDescription className="flex items-center gap-2 text-xs">
+   535→                  <Clock className="h-3 w-3" />
+   536→                  <span className="tabular">{relativeTime(selected.publishedAt)}</span>
+   537→                  <span className="text-muted-foreground/50">·</span>
+   538→                  <span className="tabular">{new Date(selected.publishedAt).toLocaleString('id-ID')}</span>
+   539→                </SheetDescription>
+   540→              </SheetHeader>
+   541→              <div className="space-y-4 px-4 pb-6">
+   542→                <div className="rounded-md border border-border bg-muted/30 p-3">
+   543→                  <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+   544→                    <SentimentIcon s={selected.sentiment} />
+   545→                    <span>Sentimen:</span>
+   546→                    <SentimentLabel s={selected.sentiment} />
+   547→                  </div>
+   548→                  <div className="flex flex-wrap gap-1.5">
+   549→                    {parseSymbols(selected.symbols).map((s) => (
+   550→                      <span key={s} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+   551→                        {SYMBOL_LABEL[s] ?? s}
+   552→                      </span>
+   553→                    ))}
+   554→                  </div>
+   555→                </div>
+   556→                <div>
+   557→                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   558→                    Ringkasan
+   559→                  </h4>
+   560→                  <p className="text-sm leading-relaxed text-foreground/90">{selected.summary}</p>
+   561→                </div>
+   562→                {selected.url && (
+   563→                  <a href={selected.url} target="_blank" rel="noreferrer">
+   564→                    <Button variant="outline" size="sm" className="gap-1.5">
+   565→                      <ExternalLink className="h-3.5 w-3.5" /> Buka sumber
+   566→                    </Button>
+   567→                  </a>
+   568→                )}
+   569→              </div>
+   570→            </>
+   571→          )}
+   572→        </SheetContent>
+   573→      </Sheet>
+   574→    </div>
+   575→  )
+   576→}
+   577→
+   578→function NewsRow({ item, index, onClick }: { item: NewsItem; index: number; onClick: () => void }) {
+   579→  return (
+   580→    <motion.button
+   581→      type="button"
+   582→      initial={{ opacity: 0, y: 4 }}
+   583→      animate={{ opacity: 1, y: 0 }}
+   584→      transition={{ delay: Math.min(index * 0.025, 0.3) }}
+   585→      onClick={onClick}
+   586→      aria-label={`Baca berita: ${item.title}`}
+   587→      className="group flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40"
+   588→    >
+   589→      <span className={cn('mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full', IMPACT_DOT[item.impact])} />
+   590→      <div className="min-w-0 flex-1">
+   591→        <div className="flex flex-wrap items-center gap-1.5">
+   592→          <Badge variant="outline" className={cn('px-1.5 py-0 text-[10px]', CATEGORY_COLOR[item.category])}>
+   593→            {NEWS_CATEGORIES.find((c) => c.value === item.category)?.label ?? item.category}
+   594→          </Badge>
+   595→          <Badge variant="outline" className={cn('px-1.5 py-0 text-[10px]', SOURCE_COLOR[item.source] ?? '')}>
+   596→            {SOURCE_LABEL[item.source] ?? item.source}
+   597→          </Badge>
+   598→        </div>
+   599→        <p className="mt-1 text-sm font-semibold leading-snug group-hover:text-emerald-300" style={lineClamp(2)}>
+   600→          {item.title}
+   601→        </p>
+   602→        <p className="mt-0.5 text-xs text-muted-foreground" style={lineClamp(3)}>
+   603→          {item.summary}
+   604→        </p>
+   605→        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+   606→          <span className="flex items-center gap-1">
+   607→            <SentimentIcon s={item.sentiment} /> <SentimentLabel s={item.sentiment} />
+   608→          </span>
+   609→          <span className="text-muted-foreground/50">·</span>
+   610→          <span className="tabular">{relativeTime(item.publishedAt)}</span>
+   611→          <span className="text-muted-foreground/50">·</span>
+   612→          <div className="flex flex-wrap gap-1">
+   613→            {parseSymbols(item.symbols).slice(0, 4).map((s) => (
+   614→              <span key={s} className="rounded bg-muted/60 px-1 py-0 font-mono text-[10px]">{s}</span>
+   615→            ))}
+   616→          </div>
+   617→        </div>
+   618→      </div>
+   619→    </motion.button>
+   620→  )
+   621→}
+   622→

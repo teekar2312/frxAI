@@ -1,0 +1,763 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useMemo, useEffect, useRef } from 'react'
+     4→     4→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     5→     5→import { motion, AnimatePresence } from 'framer-motion'
+     6→     6→import { toast } from 'sonner'
+     7→     7→import {
+     8→     8→  Bell, BellRing, ArrowUp, ArrowDown, ArrowUpRight, ArrowDownRight,
+     9→     9→  Trash2, Mail, MessageSquare, Plus, History, Target, Crosshair,
+    10→    10→  CheckCircle2, Activity, TrendingUp, TrendingDown, Sparkles, Info,
+    11→    11→} from 'lucide-react'
+    12→    12→
+    13→    13→import { api } from '@/lib/api'
+    14→    14→import { fmtPrice, relativeTime } from '@/lib/format'
+    15→    15→import {
+    16→    16→  SUPPORTED_SYMBOLS, SYMBOL_LABEL, SYMBOL_BASE,
+    17→    17→  type Alert,
+    18→    18→} from '@/lib/types'
+    19→    19→import { useFeed, useTicker } from '@/hooks/use-price-feed'
+    20→    20→import { Sparkline } from '@/components/trading/sparkline'
+    21→    21→
+    22→    22→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    23→    23→import { Button } from '@/components/ui/button'
+    24→    24→import { Input } from '@/components/ui/input'
+    25→    25→import { Label } from '@/components/ui/label'
+    26→    26→import { Switch } from '@/components/ui/switch'
+    27→    27→import { Badge } from '@/components/ui/badge'
+    28→    28→import { Skeleton } from '@/components/ui/skeleton'
+    29→    29→import {
+    30→    30→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    31→    31→} from '@/components/ui/select'
+    32→    32→import {
+    33→    33→  AlertDialog, AlertDialogAction, AlertDialogCancel,
+    34→    34→  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+    35→    35→  AlertDialogHeader, AlertDialogTitle,
+    36→    36→} from '@/components/ui/alert-dialog'
+    37→    37→import {
+    38→    38→  Collapsible, CollapsibleContent, CollapsibleTrigger,
+    39→    39→} from '@/components/ui/collapsible'
+    40→    40→import { cn } from '@/lib/utils'
+    41→    41→
+    42→    42→type Condition = Alert['condition']
+    43→    43→
+    44→    44→const CONDITIONS: { value: Condition; label: string; icon: typeof ArrowUp }[] = [
+    45→    45→  { value: 'above', label: 'Above (≥)', icon: ArrowUp },
+    46→    46→  { value: 'below', label: 'Below (≤)', icon: ArrowDown },
+    47→    47→  { value: 'cross_up', label: 'Cross Up', icon: ArrowUpRight },
+    48→    48→  { value: 'cross_down', label: 'Cross Down', icon: ArrowDownRight },
+    49→    49→]
+    50→    50→
+    51→    51→// Wrapper component to avoid creating components during render (react-hooks/static-components).
+    52→    52→function ConditionIcon({ condition, className }: { condition: Condition; className?: string }) {
+    53→    53→  switch (condition) {
+    54→    54→    case 'above': return <ArrowUp className={className} />
+    55→    55→    case 'below': return <ArrowDown className={className} />
+    56→    56→    case 'cross_up': return <ArrowUpRight className={className} />
+    57→    57→    case 'cross_down': return <ArrowDownRight className={className} />
+    58→    58→    default: return <Target className={className} />
+    59→    59→  }
+    60→    60→}
+    61→    61→
+    62→    62→function condColor(c: Condition): string {
+    63→    63→  if (c === 'above' || c === 'cross_up') return 'text-emerald-400'
+    64→    64→  return 'text-rose-400'
+    65→    65→}
+    66→    66→
+    67→    67→// Tailwind classes for the left-border color stripe by condition.
+    68→    68→function condBorderColor(c: Condition): string {
+    69→    69→  if (c === 'above' || c === 'cross_up') return 'border-l-emerald-500'
+    70→    70→  return 'border-l-rose-500'
+    71→    71→}
+    72→    72→
+    73→    73→// Calculate pip distance for an alert given live price.
+    74→    74→function pipDistance(symbol: string, current: number | undefined, target: number): { pips: number; sign: '+' | '-' } {
+    75→    75→  if (current == null) return { pips: 0, sign: '+' }
+    76→    76→  const pip = SYMBOL_BASE[symbol]?.pip ?? 0.0001
+    77→    77→  const diff = current - target
+    78→    78→  const pips = Math.abs(diff) / pip
+    79→    79→  return { pips, sign: diff >= 0 ? '+' : '-' }
+    80→    80→}
+    81→    81→
+    82→    82→// Compute 0..1 progress of how close current price is to the target.
+    83→    83→function alertProgress(symbol: string, condition: Condition, current: number | undefined, target: number): number {
+    84→    84→  if (current == null) return 0
+    85→    85→  const pip = SYMBOL_BASE[symbol]?.pip ?? 0.0001
+    86→    86→  // Define a reference window of ~50 pips as 100% scale, clamp 0..1
+    87→    87→  const window = 50 * pip
+    88→    88→  if (condition === 'above' || condition === 'cross_up') {
+    89→    89→    const dist = target - current
+    90→    90→    if (dist <= 0) return 1
+    91→    91→    return Math.max(0, Math.min(1, 1 - dist / window))
+    92→    92→  }
+    93→    93→  const dist = current - target
+    94→    94→  if (dist <= 0) return 1
+    95→    95→  return Math.max(0, Math.min(1, 1 - dist / window))
+    96→    96→}
+    97→    97→
+    98→    98→// Check whether alert should fire given the previous & current live price.
+    99→    99→function shouldFire(alert: Alert, prev: number | undefined, cur: number): boolean {
+   100→   100→  const t = alert.price
+   101→   101→  switch (alert.condition) {
+   102→   102→    case 'above': return cur >= t
+   103→   103→    case 'below': return cur <= t
+   104→   104→    case 'cross_up': return prev != null && prev < t && cur >= t
+   105→   105→    case 'cross_down': return prev != null && prev > t && cur <= t
+   106→   106→    default: return false
+   107→   107→  }
+   108→   108→}
+   109→   109→
+   110→   110→// Pip-distance pill color: emerald (far), amber (close), rose (very close).
+   111→   111→function pipPillClass(pips: number): { cls: string; label: string } {
+   112→   112→  if (pips <= 5) return { cls: 'border-rose-500/40 bg-rose-500/15 text-rose-300', label: 'sangat dekat' }
+   113→   113→  if (pips <= 20) return { cls: 'border-amber-500/40 bg-amber-500/15 text-amber-300', label: 'dekat' }
+   114→   114→  return { cls: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300', label: 'aman' }
+   115→   115→}
+   116→   116→
+   117→   117→/* ---------- Live price monitor strip ---------- */
+   118→   118→function LiveMonitorStrip() {
+   119→   119→  const tickers = useFeed((s) => s.tickers)
+   120→   120→  const symbols = SUPPORTED_SYMBOLS as readonly string[]
+   121→   121→  return (
+   122→   122→    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+   123→   123→      {symbols.map((sym) => {
+   124→   124→        const t = tickers[sym]
+   125→   125→        const up = t?.dir === 'up'
+   126→   126→        const down = t?.dir === 'down'
+   127→   127→        const colorCls = up ? 'text-emerald-400' : down ? 'text-rose-400' : 'text-muted-foreground'
+   128→   128→        return (
+   129→   129→          <motion.div
+   130→   130→            key={sym}
+   131→   131→            initial={{ opacity: 0, y: 6 }}
+   132→   132→            animate={{ opacity: 1, y: 0 }}
+   133→   133→            transition={{ duration: 0.2 }}
+   134→   134→            whileHover={{ y: -2 }}
+   135→   135→            className="relative overflow-hidden rounded-lg border border-border bg-card/60 p-2.5 transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/[0.04]"
+   136→   136→          >
+   137→   137→            <div className="pointer-events-none absolute -right-6 -top-6 h-16 w-16 rounded-full bg-emerald-500/10 blur-2xl" />
+   138→   138→            <div className="flex items-center justify-between gap-2">
+   139→   139→              <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
+   140→   140→                {SYMBOL_LABEL[sym]}
+   141→   141→              </span>
+   142→   142→              <span className={cn('flex items-center text-[10px]', colorCls)}>
+   143→   143→                {up && <TrendingUp className="h-3 w-3" />}
+   144→   144→                {down && <TrendingDown className="h-3 w-3" />}
+   145→   145→              </span>
+   146→   146→            </div>
+   147→   147→            <div className="mt-1 flex items-center justify-between gap-2">
+   148→   148→              <span className={cn('font-mono text-sm font-semibold tabular', colorCls)}>
+   149→   149→                {t ? fmtPrice(sym, t.price) : '—'}
+   150→   150→              </span>
+   151→   151→              {t && t.spark?.length > 1 && (
+   152→   152→                <Sparkline data={t.spark} width={48} height={20} />
+   153→   153→              )}
+   154→   154→            </div>
+   155→   155→            <div className="mt-0.5 text-[10px] font-mono text-muted-foreground tabular">
+   156→   156→              {t ? `${t.changePct >= 0 ? '+' : ''}${t.changePct.toFixed(2)}%` : 'offline'}
+   157→   157→            </div>
+   158→   158→          </motion.div>
+   159→   159→        )
+   160→   160→      })}
+   161→   161→    </div>
+   162→   162→  )
+   163→   163→}
+   164→   164→
+   165→   165→/* ---------- Create Alert Form ---------- */
+   166→   166→function CreateAlertForm() {
+   167→   167→  const qc = useQueryClient()
+   168→   168→  const [symbol, setSymbol] = useState<string>('EURUSD')
+   169→   169→  const [condition, setCondition] = useState<Condition>('above')
+   170→   170→  const [price, setPrice] = useState<string>('')
+   171→   171→  const [notifyEmail, setNotifyEmail] = useState<boolean>(true)
+   172→   172→  const [message, setMessage] = useState<string>('')
+   173→   173→  const ticker = useTicker(symbol)
+   174→   174→
+   175→   175→  const create = useMutation({
+   176→   176→    mutationFn: () =>
+   177→   177→      api.createAlert({
+   178→   178→        symbol,
+   179→   179→        condition,
+   180→   180→        price: parseFloat(price),
+   181→   181→        notifyEmail,
+   182→   182→        message: message.trim() || null,
+   183→   183→      }),
+   184→   184→    onSuccess: () => {
+   185→   185→      toast.success('Alert dibuat', { description: `${SYMBOL_LABEL[symbol]} ${condition} ${price}` })
+   186→   186→      qc.invalidateQueries({ queryKey: ['alerts'] })
+   187→   187→      setPrice('')
+   188→   188→      setMessage('')
+   189→   189→    },
+   190→   190→    onError: (e: Error) => toast.error('Gagal membuat alert', { description: e.message }),
+   191→   191→  })
+   192→   192→
+   193→   193→  const useCurrent = () => {
+   194→   194→    if (ticker?.price) {
+   195→   195→      setPrice(String(ticker.price))
+   196→   196→      toast.info('Harga saat ini diisi', { description: `${symbol} @ ${fmtPrice(symbol, ticker.price)}` })
+   197→   197→    } else {
+   198→   198→      toast.warning('Harga belum tersedia', { description: 'Tunggu feed harga live terhubung.' })
+   199→   199→    }
+   200→   200→  }
+   201→   201→
+   202→   202→  const submit = () => {
+   203→   203→    const p = parseFloat(price)
+   204→   204→    if (!p || p <= 0) {
+   205→   205→      toast.error('Harga tidak valid', { description: 'Masukkan harga target yang valid.' })
+   206→   206→      return
+   207→   207→    }
+   208→   208→    create.mutate()
+   209→   209→  }
+   210→   210→
+   211→   211→  return (
+   212→   212→    <Card className="relative overflow-hidden border-emerald-500/20">
+   213→   213→      {/* Gradient header strip */}
+   214→   214→      <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-r from-emerald-500/10 via-emerald-500/[0.03] to-transparent" />
+   215→   215→      <CardHeader className="relative pb-3">
+   216→   216→        <CardTitle className="flex items-center gap-2 text-base">
+   217→   217→          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-400">
+   218→   218→            <Crosshair className="h-4 w-4" />
+   219→   219→          </span>
+   220→   220→          Buat Alert Harga
+   221→   221→        </CardTitle>
+   222→   222→        <CardDescription className="text-xs">
+   223→   223→          Notifikasi otomatis ketika harga mencapai target. Compare live feed client-side.
+   224→   224→        </CardDescription>
+   225→   225→      </CardHeader>
+   226→   226→      <CardContent className="relative space-y-4">
+   227→   227→        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+   228→   228→          {/* Symbol */}
+   229→   229→          <div className="space-y-1.5">
+   230→   230→            <Label className="text-xs">Symbol</Label>
+   231→   231→            <Select value={symbol} onValueChange={setSymbol}>
+   232→   232→              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   233→   233→              <SelectContent>
+   234→   234→                {SUPPORTED_SYMBOLS.map((s) => (
+   235→   235→                  <SelectItem key={s} value={s}>{SYMBOL_LABEL[s]}</SelectItem>
+   236→   236→                ))}
+   237→   237→              </SelectContent>
+   238→   238→            </Select>
+   239→   239→            <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+   240→   240→              <Info className="h-2.5 w-2.5" /> Pair yang dimonitor
+   241→   241→            </p>
+   242→   242→          </div>
+   243→   243→
+   244→   244→          {/* Condition */}
+   245→   245→          <div className="space-y-1.5">
+   246→   246→            <Label className="text-xs">Kondisi</Label>
+   247→   247→            <Select value={condition} onValueChange={(v) => setCondition(v as Condition)}>
+   248→   248→              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   249→   249→              <SelectContent>
+   250→   250→                {CONDITIONS.map((c) => {
+   251→   251→                  return (
+   252→   252→                    <SelectItem key={c.value} value={c.value}>
+   253→   253→                      <span className="flex items-center gap-2">
+   254→   254→                        <ConditionIcon condition={c.value} className={cn('h-3.5 w-3.5', condColor(c.value))} />
+   255→   255→                        {c.label}
+   256→   256→                      </span>
+   257→   257→                    </SelectItem>
+   258→   258→                  )
+   259→   259→                })}
+   260→   260→              </SelectContent>
+   261→   261→            </Select>
+   262→   262→            <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+   263→   263→              <Info className="h-2.5 w-2.5" /> Aturan trigger alert
+   264→   264→            </p>
+   265→   265→          </div>
+   266→   266→
+   267→   267→          {/* Target Price */}
+   268→   268→          <div className="space-y-1.5 sm:col-span-2">
+   269→   269→            <Label className="text-xs flex items-center justify-between">
+   270→   270→              <span>Target Price</span>
+   271→   271→              <span className="font-mono text-[10px] text-muted-foreground">
+   272→   272→                live: {ticker ? fmtPrice(symbol, ticker.price) : '—'}
+   273→   273→              </span>
+   274→   274→            </Label>
+   275→   275→            <div className="flex gap-2">
+   276→   276→              <Input
+   277→   277→                type="number"
+   278→   278→                inputMode="decimal"
+   279→   279→                step="any"
+   280→   280→                placeholder="0.00000"
+   281→   281→                value={price}
+   282→   282→                onChange={(e) => setPrice(e.target.value)}
+   283→   283→                className="font-mono tabular"
+   284→   284→              />
+   285→   285→              <Button type="button" variant="outline" size="sm" onClick={useCurrent} className="shrink-0">
+   286→   286→                Use Current
+   287→   287→              </Button>
+   288→   288→            </div>
+   289→   289→            <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+   290→   290→              <Info className="h-2.5 w-2.5" /> Harga absolut yang mentrigger alert
+   291→   291→            </p>
+   292→   292→          </div>
+   293→   293→        </div>
+   294→   294→
+   295→   295→        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   296→   296→          <div className="space-y-1.5">
+   297→   297→            <Label className="text-xs">Pesan (opsional)</Label>
+   298→   298→            <Input
+   299→   299→              placeholder="cth: Take profit EURUSD"
+   300→   300→              value={message}
+   301→   301→              onChange={(e) => setMessage(e.target.value)}
+   302→   302→            />
+   303→   303→            <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+   304→   304→              <Info className="h-2.5 w-2.5" /> Catatan singkat untuk identifikasi
+   305→   305→            </p>
+   306→   306→          </div>
+   307→   307→
+   308→   308→          <div className="flex items-end gap-3">
+   309→   309→            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+   310→   310→              <Mail className="h-3.5 w-3.5 text-emerald-400" />
+   311→   311→              <Switch checked={notifyEmail} onCheckedChange={setNotifyEmail} />
+   312→   312→              <span className="text-xs text-muted-foreground">Notify Email</span>
+   313→   313→            </div>
+   314→   314→            <Button
+   315→   315→              className="flex-1 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-500 hover:to-emerald-400 hover:shadow-emerald-500/30"
+   316→   316→              onClick={submit}
+   317→   317→              disabled={create.isPending}
+   318→   318→            >
+   319→   319→              {create.isPending ? (
+   320→   320→                <Activity className="h-4 w-4 animate-pulse" />
+   321→   321→              ) : (
+   322→   322→                <Plus className="h-4 w-4" />
+   323→   323→              )}
+   324→   324→              Buat Alert
+   325→   325→            </Button>
+   326→   326→          </div>
+   327→   327→        </div>
+   328→   328→      </CardContent>
+   329→   329→    </Card>
+   330→   330→  )
+   331→   331→}
+   332→   332→
+   333→   333→/* ---------- Single Alert Card ---------- */
+   334→   334→function AlertCard({ alert }: { alert: Alert }) {
+   335→   335→  const qc = useQueryClient()
+   336→   336→  const [confirmDel, setConfirmDel] = useState(false)
+   337→   337→  const ticker = useTicker(alert.symbol)
+   338→   338→
+   339→   339→  const update = useMutation({
+   340→   340→    mutationFn: (active: boolean) => api.updateAlert(alert.id, { active }),
+   341→   341→    onSuccess: (_data, active) => {
+   342→   342→      qc.invalidateQueries({ queryKey: ['alerts'] })
+   343→   343→      toast.success(active ? 'Alert diaktifkan' : 'Alert dinonaktifkan')
+   344→   344→    },
+   345→   345→    onError: (e: Error) => toast.error('Gagal update alert', { description: e.message }),
+   346→   346→  })
+   347→   347→
+   348→   348→  const del = useMutation({
+   349→   349→    mutationFn: () => api.deleteAlert(alert.id),
+   350→   350→    onSuccess: () => {
+   351→   351→      qc.invalidateQueries({ queryKey: ['alerts'] })
+   352→   352→      toast.success('Alert dihapus')
+   353→   353→    },
+   354→   354→    onError: (e: Error) => toast.error('Gagal menghapus', { description: e.message }),
+   355→   355→  })
+   356→   356→
+   357→   357→  const cur = ticker?.price
+   358→   358→  const { pips, sign } = pipDistance(alert.symbol, cur, alert.price)
+   359→   359→  const progress = alertProgress(alert.symbol, alert.condition, cur, alert.price)
+   360→   360→  const isTriggered = alert.triggered
+   361→   361→  const isVeryClose = !isTriggered && progress > 0.8
+   362→   362→  const pill = pipPillClass(pips)
+   363→   363→
+   364→   364→  return (
+   365→   365→    <motion.div
+   366→   366→      layout
+   367→   367→      initial={{ opacity: 0, y: 8, scale: 0.99 }}
+   368→   368→      animate={{ opacity: 1, y: 0, scale: 1 }}
+   369→   369→      exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.15 } }}
+   370→   370→      transition={{ duration: 0.2, type: 'spring', stiffness: 300, damping: 26 }}
+   371→   371→      whileHover={{ y: -2 }}
+   372→   372→      className={cn(
+   373→   373→        'relative overflow-hidden rounded-lg border border-l-4 bg-card p-4 transition-shadow hover:shadow-lg',
+   374→   374→        condBorderColor(alert.condition),
+   375→   375→        isTriggered
+   376→   376→          ? 'border-amber-500/30 bg-amber-500/[0.04] opacity-75'
+   377→   377→          : alert.active
+   378→   378→            ? 'border-border hover:border-emerald-500/40 hover:shadow-emerald-500/5'
+   379→   379→            : 'border-dashed border-border opacity-60',
+   380→   380→      )}
+   381→   381→    >
+   382→   382→      {/* Pulsing glow when very close to target */}
+   383→   383→      {isVeryClose && (
+   384→   384→        <div className="pointer-events-none absolute inset-0 animate-pulse rounded-lg ring-1 ring-amber-500/40" />
+   385→   385→      )}
+   386→   386→
+   387→   387→      <div className="flex flex-wrap items-center gap-3">
+   388→   388→        {/* Symbol + condition */}
+   389→   389→        <div className="flex items-center gap-2">
+   390→   390→          <Badge variant="secondary" className="font-mono">{alert.symbol}</Badge>
+   391→   391→          <span className={cn('flex items-center gap-1 text-sm', condColor(alert.condition))}>
+   392→   392→            <ConditionIcon condition={alert.condition} className="h-4 w-4" />
+   393→   393→            <span className="text-xs font-medium uppercase">{alert.condition.replace('_', ' ')}</span>
+   394→   394→          </span>
+   395→   395→        </div>
+   396→   396→
+   397→   397→        {/* Prices */}
+   398→   398→        <div className="ml-auto flex items-center gap-4">
+   399→   399→          <div className="text-right">
+   400→   400→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Target</div>
+   401→   401→            <div className="font-mono text-sm font-semibold tabular">
+   402→   402→              {fmtPrice(alert.symbol, alert.price)}
+   403→   403→            </div>
+   404→   404→          </div>
+   405→   405→          <div className="text-right">
+   406→   406→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Current</div>
+   407→   407→            <div className={cn(
+   408→   408→              'font-mono text-sm font-semibold tabular',
+   409→   409→              cur == null ? 'text-muted-foreground' : sign === '+' ? 'text-emerald-400' : 'text-rose-400',
+   410→   410→            )}>
+   411→   411→              {cur != null ? fmtPrice(alert.symbol, cur) : '—'}
+   412→   412→            </div>
+   413→   413→          </div>
+   414→   414→          {/* Pip-distance colored pill */}
+   415→   415→          <div className="text-right">
+   416→   416→            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Distance</div>
+   417→   417→            {cur != null ? (
+   418→   418→              <span
+   419→   419→                className={cn(
+   420→   420→                  'inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[11px] font-semibold tabular',
+   421→   421→                  pill.cls,
+   422→   422→                )}
+   423→   423→                title={pill.label}
+   424→   424→              >
+   425→   425→                {sign}{pips.toFixed(1)}p
+   426→   426→              </span>
+   427→   427→            ) : (
+   428→   428→              <span className="font-mono text-sm tabular text-muted-foreground">—</span>
+   429→   429→            )}
+   430→   430→          </div>
+   431→   431→        </div>
+   432→   432→
+   433→   433→        {/* Status */}
+   434→   434→        <div className="flex items-center gap-2">
+   435→   435→          {isTriggered ? (
+   436→   436→            <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-300">
+   437→   437→              <CheckCircle2 className="h-3 w-3" />
+   438→   438→              TRIGGERED
+   439→   439→            </Badge>
+   440→   440→          ) : alert.active ? (
+   441→   441→            <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+   442→   442→              <BellRing className="h-3 w-3 live-dot" />
+   443→   443→              Active
+   444→   444→            </Badge>
+   445→   445→          ) : (
+   446→   446→            <Badge variant="outline" className="text-muted-foreground">
+   447→   447→              <Bell className="h-3 w-3" />
+   448→   448→              Paused
+   449→   449→            </Badge>
+   450→   450→          )}
+   451→   451→          {alert.notifyEmail && (
+   452→   452→            <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+   453→   453→          )}
+   454→   454→        </div>
+   455→   455→      </div>
+   456→   456→
+   457→   457→      {/* Progress bar */}
+   458→   458→      {!isTriggered && (
+   459→   459→        <div className="mt-3">
+   460→   460→          <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
+   461→   461→            <span className="flex items-center gap-1">
+   462→   462→              <Target className="h-2.5 w-2.5" /> Kedekatan dengan target
+   463→   463→            </span>
+   464→   464→            <span className="font-mono tabular">{(progress * 100).toFixed(0)}%</span>
+   465→   465→          </div>
+   466→   466→          <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+   467→   467→            <motion.div
+   468→   468→              className={cn(
+   469→   469→                'relative h-full rounded-full bg-gradient-to-r',
+   470→   470→                progress > 0.85
+   471→   471→                  ? 'from-amber-600 via-amber-400 to-amber-300'
+   472→   472→                  : 'from-emerald-600 via-emerald-400 to-emerald-300',
+   473→   473→              )}
+   474→   474→              initial={{ width: 0 }}
+   475→   475→              animate={{ width: `${Math.max(2, progress * 100)}%` }}
+   476→   476→              transition={{ duration: 0.6, ease: 'easeOut' }}
+   477→   477→            >
+   478→   478→              {/* Animated shimmer overlay */}
+   479→   479→              <div className="absolute inset-0 animate-pulse bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+   480→   480→              {/* Glow when > 80% */}
+   481→   481→              {progress > 0.8 && (
+   482→   482→                <div className="absolute -inset-0.5 animate-pulse rounded-full bg-amber-400/40 blur-md" />
+   483→   483→              )}
+   484→   484→            </motion.div>
+   485→   485→          </div>
+   486→   486→        </div>
+   487→   487→      )}
+   488→   488→
+   489→   489→      {/* Footer */}
+   490→   490→      <div className="mt-3 flex flex-wrap items-center gap-3">
+   491→   491→        {alert.message && (
+   492→   492→          <span className="flex items-center gap-1 text-xs text-muted-foreground italic max-w-[60%] truncate">
+   493→   493→            <MessageSquare className="h-3 w-3" />
+   494→   494→            "{alert.message}"
+   495→   495→          </span>
+   496→   496→        )}
+   497→   497→        <span className="text-[10px] font-mono text-muted-foreground ml-auto">
+   498→   498→          {isTriggered && alert.triggeredAt
+   499→   499→            ? `triggered ${relativeTime(alert.triggeredAt)}`
+   500→   500→            : `created ${relativeTime(alert.createdAt)}`}
+   501→   501→        </span>
+   502→   502→
+   503→   503→        {!isTriggered && (
+   504→   504→          <div className="flex items-center gap-1.5">
+   505→   505→            <Switch
+   506→   506→              checked={alert.active}
+   507→   507→              onCheckedChange={(v) => update.mutate(v)}
+   508→   508→              disabled={update.isPending}
+   509→   509→            />
+   510→   510→            <Button
+   511→   511→              variant="ghost"
+   512→   512→              size="icon"
+   513→   513→              className="h-7 w-7 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+   514→   514→              onClick={() => setConfirmDel(true)}
+   515→   515→            >
+   516→   516→              <Trash2 className="h-3.5 w-3.5" />
+   517→   517→            </Button>
+   518→   518→          </div>
+   519→   519→        )}
+   520→   520→      </div>
+   521→   521→
+   522→   522→      <AlertDialog open={confirmDel} onOpenChange={setConfirmDel}>
+   523→   523→        <AlertDialogContent>
+   524→   524→          <AlertDialogHeader>
+   525→   525→            <AlertDialogTitle>Hapus alert ini?</AlertDialogTitle>
+   526→   526→            <AlertDialogDescription>
+   527→   527→              Alert {alert.symbol} {alert.condition} {fmtPrice(alert.symbol, alert.price)} akan dihapus permanen.
+   528→   528→            </AlertDialogDescription>
+   529→   529→          </AlertDialogHeader>
+   530→   530→          <AlertDialogFooter>
+   531→   531→            <AlertDialogCancel>Batal</AlertDialogCancel>
+   532→   532→            <AlertDialogAction
+   533→   533→              className="bg-rose-600 text-white hover:bg-rose-700"
+   534→   534→              onClick={() => del.mutate()}
+   535→   535→            >
+   536→   536→              Hapus
+   537→   537→            </AlertDialogAction>
+   538→   538→          </AlertDialogFooter>
+   539→   539→        </AlertDialogContent>
+   540→   540→      </AlertDialog>
+   541→   541→    </motion.div>
+   542→   542→  )
+   543→   543→}
+   544→   544→
+   545→   545→/* ---------- Loading skeleton row ---------- */
+   546→   546→function AlertSkeletonRow() {
+   547→   547→  return (
+   548→   548→    <div className="rounded-lg border border-l-4 border-border border-l-emerald-500/40 bg-card p-4">
+   549→   549→      <div className="flex items-center gap-3">
+   550→   550→        <Skeleton className="h-5 w-16" />
+   551→   551→        <Skeleton className="h-4 w-20" />
+   552→   552→        <div className="ml-auto flex items-center gap-4">
+   553→   553→          <div className="space-y-1">
+   554→   554→            <Skeleton className="h-2.5 w-10" />
+   555→   555→            <Skeleton className="h-4 w-16" />
+   556→   556→          </div>
+   557→   557→          <div className="space-y-1">
+   558→   558→            <Skeleton className="h-2.5 w-12" />
+   559→   559→            <Skeleton className="h-4 w-16" />
+   560→   560→          </div>
+   561→   561→          <div className="space-y-1">
+   562→   562→            <Skeleton className="h-2.5 w-12" />
+   563→   563→            <Skeleton className="h-5 w-14 rounded-full" />
+   564→   564→          </div>
+   565→   565→        </div>
+   566→   566→      </div>
+   567→   567→      <div className="mt-3 space-y-1.5">
+   568→   568→        <div className="flex justify-between">
+   569→   569→          <Skeleton className="h-2.5 w-32" />
+   570→   570→          <Skeleton className="h-2.5 w-8" />
+   571→   571→        </div>
+   572→   572→        <Skeleton className="h-2 w-full rounded-full" />
+   573→   573→      </div>
+   574→   574→    </div>
+   575→   575→  )
+   576→   576→}
+   577→   577→
+   578→   578→/* ---------- Triggered History ---------- */
+   579→   579→function TriggeredHistory({ alerts }: { alerts: Alert[] }) {
+   580→   580→  const [open, setOpen] = useState(false)
+   581→   581→  if (alerts.length === 0) return null
+   582→   582→  return (
+   583→   583→    <Collapsible open={open} onOpenChange={setOpen} className="relative overflow-hidden rounded-lg border border-amber-500/30 bg-amber-500/[0.03]">
+   584→   584→      <div className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-r from-amber-500/10 to-transparent" />
+   585→   585→      <CollapsibleTrigger asChild>
+   586→   586→        <button className="relative flex w-full items-center gap-2 p-3 text-left transition-colors hover:bg-amber-500/[0.05]">
+   587→   587→          <History className="h-4 w-4 text-amber-400" />
+   588→   588→          <span className="text-sm font-medium">Riwayat Alert Triggered</span>
+   589→   589→          <Badge variant="outline" className="ml-1 border-amber-500/40 bg-amber-500/10 text-amber-300">
+   590→   590→            {alerts.length}
+   591→   591→          </Badge>
+   592→   592→          <span className="ml-auto text-[10px] text-muted-foreground">
+   593→   593→            {open ? 'Sembunyikan' : 'Tampilkan'}
+   594→   594→          </span>
+   595→   595→        </button>
+   596→   596→      </CollapsibleTrigger>
+   597→   597→      <CollapsibleContent>
+   598→   598→        <div className="space-y-2 p-3 pt-0 max-h-72 overflow-y-auto scroll-thin">
+   599→   599→          <AnimatePresence initial={false}>
+   600→   600→            {alerts.map((a) => {
+   601→   601→              return (
+   602→   602→                <motion.div
+   603→   603→                  key={a.id}
+   604→   604→                  layout
+   605→   605→                  initial={{ opacity: 0, y: 4 }}
+   606→   606→                  animate={{ opacity: 1, y: 0 }}
+   607→   607→                  exit={{ opacity: 0, x: -8 }}
+   608→   608→                  transition={{ duration: 0.15 }}
+   609→   609→                  className="flex items-center gap-3 rounded-md border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2 text-xs transition-colors hover:bg-amber-500/[0.08]"
+   610→   610→                >
+   611→   611→                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+   612→   612→                  <Badge variant="secondary" className="font-mono">{a.symbol}</Badge>
+   613→   613→                  <ConditionIcon condition={a.condition} className={cn('h-3.5 w-3.5', condColor(a.condition))} />
+   614→   614→                  <span className="font-mono tabular">{fmtPrice(a.symbol, a.price)}</span>
+   615→   615→                  {a.message && <span className="italic text-muted-foreground truncate max-w-[40%]">"{a.message}"</span>}
+   616→   616→                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+   617→   617→                    {a.triggeredAt ? relativeTime(a.triggeredAt) : '—'}
+   618→   618→                  </span>
+   619→   619→                </motion.div>
+   620→   620→              )
+   621→   621→            })}
+   622→   622→          </AnimatePresence>
+   623→   623→        </div>
+   624→   624→      </CollapsibleContent>
+   625→   625→    </Collapsible>
+   626→   626→  )
+   627→   627→}
+   628→   628→
+   629→   629→/* ---------- Main Panel ---------- */
+   630→   630→export function AlertsPanel() {
+   631→   631→  const { data, isLoading } = useQuery({
+   632→   632→    queryKey: ['alerts'],
+   633→   633→    queryFn: () => api.alerts(),
+   634→   634→    refetchInterval: 10_000,
+   635→   635→  })
+   636→   636→
+   637→   637→  const alerts = data?.alerts ?? []
+   638→   638→  const active = alerts.filter((a) => !a.triggered)
+   639→   639→  const triggered = alerts.filter((a) => a.triggered)
+   640→   640→
+   641→   641→  // Live trigger detection
+   642→   642→  const firedRef = useRef<Set<string>>(new Set())
+   643→   643→  const prevPriceRef = useRef<Record<string, number | undefined>>({})
+   644→   644→  const tickers = useFeed((s) => s.tickers)
+   645→   645→
+   646→   646→  useEffect(() => {
+   647→   647→    for (const alert of active) {
+   648→   648→      if (!alert.active) continue
+   649→   649→      if (firedRef.current.has(alert.id)) continue
+   650→   650→      const cur = tickers[alert.symbol]?.price
+   651→   651→      const prev = prevPriceRef.current[alert.symbol]
+   652→   652→      if (cur == null) continue
+   653→   653→      if (shouldFire(alert, prev, cur)) {
+   654→   654→        firedRef.current.add(alert.id)
+   655→   655→        toast.success('🔔 Alert Triggered!', {
+   656→   656→          description: `${alert.symbol} ${alert.condition.replace('_', ' ')} ${fmtPrice(alert.symbol, alert.price)} — current ${fmtPrice(alert.symbol, cur)}`,
+   657→   657→          duration: 8000,
+   658→   658→        })
+   659→   659→      }
+   660→   660→    }
+   661→   661→    // Update prev prices
+   662→   662→    for (const sym of SUPPORTED_SYMBOLS) {
+   663→   663→      prevPriceRef.current[sym] = tickers[sym]?.price ?? prevPriceRef.current[sym]
+   664→   664→    }
+   665→   665→  }, [tickers, active])
+   666→   666→
+   667→   667→  // Clean up fired set when alerts get removed
+   668→   668→  useEffect(() => {
+   669→   669→    const validIds = new Set(alerts.map((a) => a.id))
+   670→   670→    for (const id of Array.from(firedRef.current)) {
+   671→   671→      if (!validIds.has(id)) firedRef.current.delete(id)
+   672→   672→    }
+   673→   673→  }, [alerts])
+   674→   674→
+   675→   675→  return (
+   676→   676→    <div className="space-y-4 p-4 md:p-6">
+   677→   677→      {/* Header */}
+   678→   678→      <div className="flex flex-wrap items-center gap-3">
+   679→   679→        <div>
+   680→   680→          <h2 className="flex items-center gap-2 text-xl font-bold tracking-tight">
+   681→   681→            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+   682→   682→              <BellRing className="h-5 w-5" />
+   683→   683→            </span>
+   684→   684→            Price Alerts
+   685→   685→          </h2>
+   686→   686→          <p className="text-xs text-muted-foreground mt-1">
+   687→   687→            Monitor 4 pair utama dengan notifikasi email & visual.
+   688→   688→          </p>
+   689→   689→        </div>
+   690→   690→        <div className="ml-auto flex items-center gap-2 text-[11px] text-muted-foreground">
+   691→   691→          <span className="flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+   692→   692→            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 live-dot" />
+   693→   693→            Live Monitor
+   694→   694→          </span>
+   695→   695→          <span className="font-mono tabular">{active.length} active · {triggered.length} triggered</span>
+   696→   696→        </div>
+   697→   697→      </div>
+   698→   698→
+   699→   699→      {/* Live strip */}
+   700→   700→      <LiveMonitorStrip />
+   701→   701→
+   702→   702→      {/* Create form */}
+   703→   703→      <CreateAlertForm />
+   704→   704→
+   705→   705→      {/* Active alerts list */}
+   706→   706→      <Card className="relative overflow-hidden">
+   707→   707→        <div className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-gradient-to-r from-emerald-500/[0.06] to-transparent" />
+   708→   708→        <CardHeader className="relative pb-3">
+   709→   709→          <CardTitle className="flex items-center gap-2 text-base">
+   710→   710→            <Target className="h-4 w-4 text-emerald-400" />
+   711→   711→            Active Alerts
+   712→   712→            <Badge variant="outline" className="ml-1">{active.length}</Badge>
+   713→   713→          </CardTitle>
+   714→   714→          <CardDescription className="text-xs">
+   715→   715→            Harga live dari websocket. Progress bar menunjukkan kedekatan dengan target.
+   716→   716→          </CardDescription>
+   717→   717→        </CardHeader>
+   718→   718→        <CardContent>
+   719→   719→          {isLoading ? (
+   720→   720→            <div className="space-y-2">
+   721→   721→              {[0, 1, 2].map((i) => (
+   722→   722→                <AlertSkeletonRow key={i} />
+   723→   723→              ))}
+   724→   724→            </div>
+   725→   725→          ) : active.length === 0 ? (
+   726→   726→            <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+   727→   727→              <div className="relative">
+   728→   728→                <div className="pointer-events-none absolute inset-0 -z-10 rounded-full bg-emerald-500/10 blur-2xl" />
+   729→   729→                <div className="flex h-14 w-14 items-center justify-center rounded-full border border-dashed border-emerald-500/30 bg-emerald-500/5">
+   730→   730→                  <Bell className="h-7 w-7 text-emerald-400/60" />
+   731→   731→                </div>
+   732→   732→              </div>
+   733→   733→              <div className="space-y-1">
+   734→   734→                <p className="text-sm font-medium text-foreground">Belum ada alert aktif</p>
+   735→   735→                <p className="text-xs text-muted-foreground/70 max-w-xs">
+   736→   736→                  Buat alert harga pertama Anda di atas — dapatkan notifikasi visual & email ketika market menyentuh target.
+   737→   737→                </p>
+   738→   738→              </div>
+   739→   739→              <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.04] px-3 py-1 text-[10px] text-emerald-300">
+   740→   740→                <Sparkles className="h-3 w-3" />
+   741→   741→                Tip: klik "Use Current" untuk pre-fill harga live
+   742→   742→              </div>
+   743→   743→            </div>
+   744→   744→          ) : (
+   745→   745→            <div className="space-y-2 max-h-[600px] overflow-y-auto scroll-thin pr-1">
+   746→   746→              <AnimatePresence mode="popLayout">
+   747→   747→                {active.map((a) => (
+   748→   748→                  <AlertCard key={a.id} alert={a} />
+   749→   749→                ))}
+   750→   750→              </AnimatePresence>
+   751→   751→            </div>
+   752→   752→          )}
+   753→   753→        </CardContent>
+   754→   754→      </Card>
+   755→   755→
+   756→   756→      {/* Triggered history */}
+   757→   757→      <TriggeredHistory alerts={triggered} />
+   758→   758→    </div>
+   759→   759→  )
+   760→   760→}
+   761→   761→
+   762→   762→export default AlertsPanel
+   763→   763→

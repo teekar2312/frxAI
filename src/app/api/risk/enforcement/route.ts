@@ -1,0 +1,73 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getRiskConfig, isDailyLossCircuitBreakerActive, enforceTradeOpen } from '@/lib/risk-enforcement'
+import { requireAuth } from '@/lib/auth-server'
+import { db } from '@/lib/db'
+
+export const dynamic = 'force-dynamic'
+
+/**
+ * GET /api/risk/enforcement?accountId=xxx
+ *
+ * Returns the current risk enforcement configuration + status:
+ * - All risk limits (maxPositions, maxLotSize, dailyRiskLimit, etc.)
+ * - Current usage (open positions, total lot, daily P&L)
+ * - Whether the daily loss circuit breaker is active
+ * - Whether new trades are currently allowed
+ *
+ * Used by the Trading panel to show enforcement status to the user
+ * BEFORE they try to open a trade.
+ */
+export async function GET(req: NextRequest) {
+  const user = await requireAuth()
+  if (user instanceof NextResponse) return user
+
+  try {
+    const { searchParams } = new URL(req.url)
+    const accountId = searchParams.get('accountId')
+    const cfg = await getRiskConfig()
+
+    if (!accountId) {
+      return NextResponse.json({ config: cfg })
+    }
+
+    const account = await db.account.findUnique({ where: { id: accountId } })
+    if (!account) {
+      return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+    }
+
+    // Check circuit breaker
+    const breaker = await isDailyLossCircuitBreakerActive(accountId)
+
+    // Simulate a trade open check (0.01 lot, no SL) to see if trades are currently allowed
+    const testCheck = await enforceTradeOpen({
+      accountId,
+      symbol: 'EURUSD',
+      side: 'buy',
+      lotSize: 0.01,
+      stopLoss: null,
+    })
+
+    // Count open positions + total lot
+    const openTrades = await db.trade.findMany({
+      where: { accountId, status: 'open' },
+    })
+
+    return NextResponse.json({
+      config: cfg,
+      status: {
+        openPositions: openTrades.length,
+        totalLot: Number(openTrades.reduce((s, t) => s + t.lotSize, 0).toFixed(2)),
+        dailyLossCircuitBreakerActive: breaker.active,
+        dailyPnlPct: breaker.dailyPnlPct,
+        tradesAllowed: testCheck.allowed,
+        violations: testCheck.violations,
+        context: testCheck.context,
+      },
+    })
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message || 'Failed to fetch enforcement status' },
+      { status: 500 },
+    )
+  }
+}

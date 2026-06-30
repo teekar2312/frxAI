@@ -1,0 +1,627 @@
+     1→     1→     1→'use client'
+     2→     2→     2→
+     3→     3→     3→// Trade Analytics Panel — Task ID: r5 (review cycle)
+     4→     4→     4→// Performance journal: win rate, P&L by pair/session/source, equity curve,
+     5→     5→     5→// streak analysis, P&L distribution. The "trade journal" the spec implies.
+     6→     6→     6→
+     7→     7→     7→import { useState, useMemo } from 'react'
+     8→     8→     8→import { useQuery } from '@tanstack/react-query'
+     9→     9→     9→import { motion } from 'framer-motion'
+    10→    10→    10→import { toast } from 'sonner'
+    11→    11→    11→import {
+    12→    12→    12→  BarChart3, TrendingUp, TrendingDown, Trophy, Flame, Target,
+    13→    13→    13→  Activity, Clock, Award, Zap, Calendar, Percent, DollarSign,
+    14→    14→    14→  Loader2, BarChart2, PieChart as PieIcon, LineChart as LineIcon,
+    15→    15→    15→  Download, FileSpreadsheet,
+    16→    16→    16→} from 'lucide-react'
+    17→    17→    17→import {
+    18→    18→    18→  AreaChart, Area, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis,
+    19→    19→    19→  CartesianGrid, BarChart, Bar, Cell, PieChart, Pie, LineChart, Line,
+    20→    20→    20→  RadialBarChart, RadialBar, PolarAngleAxis,
+    21→    21→    21→} from 'recharts'
+    22→    22→    22→
+    23→    23→    23→import { api } from '@/lib/api'
+    24→    24→    24→import type { TradeAnalytics as Analytics } from '@/lib/types'
+    25→    25→    25→import { fmtMoney, fmtPct } from '@/lib/format'
+    26→    26→    26→import { cn } from '@/lib/utils'
+    27→    27→    27→import { useActiveAccount } from '@/hooks/use-active-account'
+    28→    28→    28→import {
+    29→    29→    29→  Card, CardContent, CardHeader, CardTitle, CardDescription,
+    30→    30→    30→} from '@/components/ui/card'
+    31→    31→    31→import { Badge } from '@/components/ui/badge'
+    32→    32→    32→import { Button } from '@/components/ui/button'
+    33→    33→    33→import {
+    34→    34→    34→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    35→    35→    35→} from '@/components/ui/select'
+    36→    36→    36→import { ScrollArea } from '@/components/ui/scroll-area'
+    37→    37→    37→
+    38→    38→    38→const SOURCE_LABELS: Record<string, string> = {
+    39→    39→    39→  manual: 'Manual',
+    40→    40→    40→  auto: 'Auto (AI)',
+    41→    41→    41→  ai: 'AI Signal',
+    42→    42→    42→}
+    43→    43→    43→
+    44→    44→    44→const SESSION_COLORS: Record<string, string> = {
+    45→    45→    45→  Overlap: '#10b981',
+    46→    46→    46→  London: '#22d3ee',
+    47→    47→    47→  'New York': '#a78bfa',
+    48→    48→    48→  Tokyo: '#f59e0b',
+    49→    49→    49→  Sydney: '#f43f5e',
+    50→    50→    50→  'Off-Session': '#64748b',
+    51→    51→    51→}
+    52→    52→    52→
+    53→    53→    53→function KpiCard({
+    54→    54→    54→  label, value, sublabel, icon: Icon, color = 'emerald', trend,
+    55→    55→    55→}: {
+    56→    56→    56→  label: string
+    57→    57→    57→  value: string
+    58→    58→    58→  sublabel?: string
+    59→    59→    59→  icon: any
+    60→    60→    60→  color?: 'emerald' | 'rose' | 'amber' | 'cyan' | 'violet'
+    61→    61→    61→  trend?: 'up' | 'down' | 'flat'
+    62→    62→    62→}) {
+    63→    63→    63→  const colorMap = {
+    64→    64→    64→    emerald: 'text-emerald-400 bg-emerald-500/10',
+    65→    65→    65→    rose: 'text-rose-400 bg-rose-500/10',
+    66→    66→    66→    amber: 'text-amber-400 bg-amber-500/10',
+    67→    67→    67→    cyan: 'text-cyan-400 bg-cyan-500/10',
+    68→    68→    68→    violet: 'text-violet-400 bg-violet-500/10',
+    69→    69→    69→  }
+    70→    70→    70→  return (
+    71→    71→    71→    <motion.div
+    72→    72→    72→      initial={{ opacity: 0, y: 8 }}
+    73→    73→    73→      animate={{ opacity: 1, y: 0 }}
+    74→    74→    74→      transition={{ duration: 0.3 }}
+    75→    75→    75→    >
+    76→    76→    76→      <Card className="relative overflow-hidden group hover:border-emerald-500/30 transition-colors">
+    77→    77→    77→        <CardContent className="p-4">
+    78→    78→    78→          <div className="flex items-start justify-between mb-2">
+    79→    79→    79→            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
+    80→    80→    80→            <div className={cn('flex h-7 w-7 items-center justify-center rounded-lg', colorMap[color])}>
+    81→    81→    81→              <Icon className="h-3.5 w-3.5" />
+    82→    82→    82→            </div>
+    83→    83→    83→          </div>
+    84→    84→    84→          <p className={cn(
+    85→    85→    85→            'text-2xl font-bold tabular',
+    86→    86→    86→            trend === 'up' && 'text-bull',
+    87→    87→    87→            trend === 'down' && 'text-bear',
+    88→    88→    88→          )}>
+    89→    89→    89→            {value}
+    90→    90→    90→          </p>
+    91→    91→    91→          {sublabel && <p className="text-[11px] text-muted-foreground mt-0.5">{sublabel}</p>}
+    92→    92→    92→        </CardContent>
+    93→    93→    93→      </Card>
+    94→    94→    94→    </motion.div>
+    95→    95→    95→  )
+    96→    96→    96→}
+    97→    97→    97→
+    98→    98→    98→function WinRateGauge({ winRate, wins, losses }: { winRate: number; wins: number; losses: number }) {
+    99→    99→    99→  const data = [{ name: 'winRate', value: winRate, fill: winRate >= 60 ? 'var(--bull)' : winRate >= 45 ? 'var(--warn)' : 'var(--bear)' }]
+   100→   100→   100→  return (
+   101→   101→   101→    <Card>
+   102→   102→   102→      <CardHeader className="pb-2">
+   103→   103→   103→        <CardTitle className="text-sm flex items-center gap-2">
+   104→   104→   104→          <Percent className="h-4 w-4 text-emerald-500" />
+   105→   105→   105→          Win Rate
+   106→   106→   106→        </CardTitle>
+   107→   107→   107→      </CardHeader>
+   108→   108→   108→      <CardContent className="flex items-center justify-center">
+   109→   109→   109→        <div className="relative">
+   110→   110→   110→          <ResponsiveContainer width={180} height={140}>
+   111→   111→   111→            <RadialBarChart innerRadius="70%" outerRadius="100%" data={data} startAngle={90} endAngle={-270}>
+   112→   112→   112→              <PolarAngleAxis type="number" domain={[0, 100]} tick={false} />
+   113→   113→   113→              <RadialBar background={{ fill: 'var(--muted)' }} dataKey="value" cornerRadius={10} />
+   114→   114→   114→            </RadialBarChart>
+   115→   115→   115→          </ResponsiveContainer>
+   116→   116→   116→          <div className="absolute inset-0 flex flex-col items-center justify-center">
+   117→   117→   117→            <span className="text-3xl font-bold tabular">{winRate.toFixed(1)}%</span>
+   118→   118→   118→            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Win Rate</span>
+   119→   119→   119→          </div>
+   120→   120→   120→        </div>
+   121→   121→   121→        <div className="flex flex-col gap-2 ml-4">
+   122→   122→   122→          <div className="flex items-center gap-2">
+   123→   123→   123→            <span className="h-2.5 w-2.5 rounded-full bg-bull" />
+   124→   124→   124→            <span className="text-xs text-muted-foreground">Wins</span>
+   125→   125→   125→            <span className="text-sm font-bold tabular text-bull">{wins}</span>
+   126→   126→   126→          </div>
+   127→   127→   127→          <div className="flex items-center gap-2">
+   128→   128→   128→            <span className="h-2.5 w-2.5 rounded-full bg-bear" />
+   129→   129→   129→            <span className="text-xs text-muted-foreground">Losses</span>
+   130→   130→   130→            <span className="text-sm font-bold tabular text-bear">{losses}</span>
+   131→   131→   131→          </div>
+   132→   132→   132→        </div>
+   133→   133→   133→      </CardContent>
+   134→   134→   134→    </Card>
+   135→   135→   135→  )
+   136→   136→   136→}
+   137→   137→   137→
+   138→   138→   138→function EquityCurve({ data }: { data: { t: string; equity: number }[] }) {
+   139→   139→   139→  if (!data || data.length === 0) {
+   140→   140→   140→    return (
+   141→   141→   141→      <Card className="lg:col-span-2">
+   142→   142→   142→        <CardHeader className="pb-2">
+   143→   143→   143→          <CardTitle className="text-sm flex items-center gap-2">
+   144→   144→   144→            <LineIcon className="h-4 w-4 text-emerald-500" />
+   145→   145→   145→            Equity Curve (Cumulative P&L)
+   146→   146→   146→          </CardTitle>
+   147→   147→   147→        </CardHeader>
+   148→   148→   148→        <CardContent className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">
+   149→   149→   149→          <div className="text-center">
+   150→   150→   150→            <Activity className="h-10 w-10 mx-auto mb-2 opacity-30" />
+   151→   151→   151→            Belum ada trade closed untuk ditampilkan
+   152→   152→   152→          </div>
+   153→   153→   153→        </CardContent>
+   154→   154→   154→      </Card>
+   155→   155→   155→    )
+   156→   156→   156→  }
+   157→   157→   157→  const chartData = data.map((d) => ({ ...d, label: new Date(d.t).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) }))
+   158→   158→   158→  const isPositive = data[data.length - 1]?.equity >= 0
+   159→   159→   159→  const stroke = isPositive ? 'var(--bull)' : 'var(--bear)'
+   160→   160→   160→  return (
+   161→   161→   161→    <Card className="lg:col-span-2">
+   162→   162→   162→      <CardHeader className="pb-2">
+   163→   163→   163→        <div className="flex items-center justify-between">
+   164→   164→   164→          <CardTitle className="text-sm flex items-center gap-2">
+   165→   165→   165→            <LineIcon className="h-4 w-4 text-emerald-500" />
+   166→   166→   166→            Equity Curve (Cumulative P&L)
+   167→   167→   167→          </CardTitle>
+   168→   168→   168→          <Badge variant="outline" className={cn('text-xs', isPositive ? 'text-bull border-bull/30' : 'text-bear border-bear/30')}>
+   169→   169→   169→            {isPositive ? '+' : ''}{fmtMoney(data[data.length - 1]?.equity || 0)}
+   170→   170→   170→          </Badge>
+   171→   171→   171→        </div>
+   172→   172→   172→      </CardHeader>
+   173→   173→   173→      <CardContent>
+   174→   174→   174→        <ResponsiveContainer width="100%" height={280}>
+   175→   175→   175→          <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -10 }}>
+   176→   176→   176→            <defs>
+   177→   177→   177→              <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+   178→   178→   178→                <stop offset="0%" stopColor={stroke} stopOpacity={0.35} />
+   179→   179→   179→                <stop offset="100%" stopColor={stroke} stopOpacity={0} />
+   180→   180→   180→              </linearGradient>
+   181→   181→   181→            </defs>
+   182→   182→   182→            <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+   183→   183→   183→            <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} minTickGap={30} />
+   184→   184→   184→            <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v.toFixed(0)}`} />
+   185→   185→   185→            <RTooltip
+   186→   186→   186→              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   187→   187→   187→              labelStyle={{ color: 'var(--muted-foreground)' }}
+   188→   188→   188→              formatter={(v: any) => [fmtMoney(Number(v)), 'Cumulative P&L']}
+   189→   189→   189→            />
+   190→   190→   190→            <Area type="monotone" dataKey="equity" stroke={stroke} strokeWidth={2} fill="url(#eqGrad)" isAnimationActive={false} />
+   191→   191→   191→          </AreaChart>
+   192→   192→   192→        </ResponsiveContainer>
+   193→   193→   193→      </CardContent>
+   194→   194→   194→    </Card>
+   195→   195→   195→  )
+   196→   196→   196→}
+   197→   197→   197→
+   198→   198→   198→function PnlDistribution({ data }: { data: { range: string; count: number }[] }) {
+   199→   199→   199→  const colors = ['var(--bear)', '#f87171', '#fbbf24', '#86efac', 'var(--bull)', 'var(--bull)']
+   200→   200→   200→  return (
+   201→   201→   201→    <Card>
+   202→   202→   202→      <CardHeader className="pb-2">
+   203→   203→   203→        <CardTitle className="text-sm flex items-center gap-2">
+   204→   204→   204→          <BarChart2 className="h-4 w-4 text-emerald-500" />
+   205→   205→   205→          Distribusi P&L per Trade
+   206→   206→   206→        </CardTitle>
+   207→   207→   207→      </CardHeader>
+   208→   208→   208→      <CardContent>
+   209→   209→   209→        <ResponsiveContainer width="100%" height={200}>
+   210→   210→   210→          <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
+   211→   211→   211→            <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+   212→   212→   212→            <XAxis dataKey="range" tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} angle={-15} textAnchor="end" height={50} />
+   213→   213→   213→            <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} allowDecimals={false} />
+   214→   214→   214→            <RTooltip
+   215→   215→   215→              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   216→   216→   216→              cursor={{ fill: 'var(--accent)', opacity: 0.3 }}
+   217→   217→   217→            />
+   218→   218→   218→            <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+   219→   219→   219→              {data.map((_, i) => <Cell key={i} fill={colors[i] || 'var(--muted-foreground)'} />)}
+   220→   220→   220→            </Bar>
+   221→   221→   221→          </BarChart>
+   222→   222→   222→        </ResponsiveContainer>
+   223→   223→   223→      </CardContent>
+   224→   224→   224→    </Card>
+   225→   225→   225→  )
+   226→   226→   226→}
+   227→   227→   227→
+   228→   228→   228→function ByPairChart({ data }: { data: { symbol: string; trades: number; winRate: number; netPnl: number }[] }) {
+   229→   229→   229→  if (!data || data.length === 0) {
+   230→   230→   230→    return <EmptyChart title="Performa per Pair" icon={Trophy} />
+   231→   231→   231→  }
+   232→   232→   232→  return (
+   233→   233→   233→    <Card>
+   234→   234→   234→      <CardHeader className="pb-2">
+   235→   235→   235→        <CardTitle className="text-sm flex items-center gap-2">
+   236→   236→   236→          <Trophy className="h-4 w-4 text-emerald-500" />
+   237→   237→   237→          Performa per Pair
+   238→   238→   238→        </CardTitle>
+   239→   239→   239→      </CardHeader>
+   240→   240→   240→      <CardContent>
+   241→   241→   241→        <div className="space-y-2">
+   242→   242→   242→          {data.map((d) => (
+   243→   243→   243→            <div key={d.symbol} className="flex items-center gap-3">
+   244→   244→   244→              <span className="w-16 text-xs font-mono font-semibold shrink-0">{d.symbol}</span>
+   245→   245→   245→              <div className="flex-1 flex items-center gap-2">
+   246→   246→   246→                <div className="flex-1 h-6 rounded bg-muted overflow-hidden relative">
+   247→   247→   247→                  <div
+   248→   248→   248→                    className={cn('h-full rounded', d.netPnl >= 0 ? 'bg-bull/70' : 'bg-bear/70')}
+   249→   249→   249→                    style={{ width: `${Math.min(100, Math.abs(d.netPnl) / Math.max(1, Math.max(...data.map((x) => Math.abs(x.netPnl)))) * 100)}%` }}
+   250→   250→   250→                  />
+   251→   251→   251→                  <span className="absolute inset-0 flex items-center px-2 text-[10px] font-mono font-bold tabular">
+   252→   252→   252→                    {d.netPnl >= 0 ? '+' : ''}{fmtMoney(d.netPnl)}
+   253→   253→   253→                  </span>
+   254→   254→   254→                </div>
+   255→   255→   255→              </div>
+   256→   256→   256→              <div className="w-16 text-right shrink-0">
+   257→   257→   257→                <span className="text-[10px] text-muted-foreground">{d.trades} trade</span>
+   258→   258→   258→                <span className={cn('block text-[11px] font-mono font-bold', d.winRate >= 50 ? 'text-bull' : 'text-bear')}>
+   259→   259→   259→                  {d.winRate.toFixed(0)}% win
+   260→   260→   260→                </span>
+   261→   261→   261→              </div>
+   262→   262→   262→            </div>
+   263→   263→   263→          ))}
+   264→   264→   264→        </div>
+   265→   265→   265→      </CardContent>
+   266→   266→   266→    </Card>
+   267→   267→   267→  )
+   268→   268→   268→}
+   269→   269→   269→
+   270→   270→   270→function BySessionChart({ data }: { data: { session: string; trades: number; winRate: number; netPnl: number }[] }) {
+   271→   271→   271→  if (!data || data.length === 0) {
+   272→   272→   272→    return <EmptyChart title="Performa per Sesi Trading" icon={Clock} />
+   273→   273→   273→  }
+   274→   274→   274→  const chartData = data.map((d) => ({ ...d, fill: SESSION_COLORS[d.session] || 'var(--muted-foreground)' }))
+   275→   275→   275→  return (
+   276→   276→   276→    <Card>
+   277→   277→   277→      <CardHeader className="pb-2">
+   278→   278→   278→        <CardTitle className="text-sm flex items-center gap-2">
+   279→   279→   279→          <Clock className="h-4 w-4 text-emerald-500" />
+   280→   280→   280→          P&L per Sesi Trading
+   281→   281→   281→        </CardTitle>
+   282→   282→   282→      </CardHeader>
+   283→   283→   283→      <CardContent>
+   284→   284→   284→        <ResponsiveContainer width="100%" height={200}>
+   285→   285→   285→          <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+   286→   286→   286→            <CartesianGrid strokeDasharray="3 3" className="stroke-border" horizontal={false} />
+   287→   287→   287→            <XAxis type="number" tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v.toFixed(0)}`} />
+   288→   288→   288→            <YAxis type="category" dataKey="session" tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} width={70} />
+   289→   289→   289→            <RTooltip
+   290→   290→   290→              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   291→   291→   291→              cursor={{ fill: 'var(--accent)', opacity: 0.3 }}
+   292→   292→   292→              formatter={(v: any, _n: any, p: any) => [fmtMoney(Number(v)), `P&L (${p.payload.trades} trade, ${p.payload.winRate.toFixed(0)}% win)`]}
+   293→   293→   293→            />
+   294→   294→   294→            <Bar dataKey="netPnl" radius={[0, 4, 4, 0]}>
+   295→   295→   295→              {chartData.map((d, i) => <Cell key={i} fill={d.netPnl >= 0 ? d.fill : 'var(--bear)'} />)}
+   296→   296→   296→            </Bar>
+   297→   297→   297→          </BarChart>
+   298→   298→   298→        </ResponsiveContainer>
+   299→   299→   299→      </CardContent>
+   300→   300→   300→    </Card>
+   301→   301→   301→  )
+   302→   302→   302→}
+   303→   303→   303→
+   304→   304→   304→function BySourceChart({ data }: { data: { source: string; trades: number; winRate: number; netPnl: number }[] }) {
+   305→   305→   305→  if (!data || data.length === 0) {
+   306→   306→   306→    return <EmptyChart title="Performa per Sumber (Manual/Auto/AI)" icon={Zap} />
+   307→   307→   307→  }
+   308→   308→   308→  const total = data.reduce((s, d) => s + d.trades, 0)
+   309→   309→   309→  const pieData = data.map((d) => ({ name: SOURCE_LABELS[d.source] || d.source, value: d.trades, pnl: d.netPnl, winRate: d.winRate, fill: d.source === 'ai' ? 'var(--chart-5)' : d.source === 'auto' ? 'var(--chart-3)' : 'var(--chart-1)' }))
+   310→   310→   310→  return (
+   311→   311→   311→    <Card>
+   312→   312→   312→      <CardHeader className="pb-2">
+   313→   313→   313→        <CardTitle className="text-sm flex items-center gap-2">
+   314→   314→   314→          <PieIcon className="h-4 w-4 text-emerald-500" />
+   315→   315→   315→          Sumber Trade
+   316→   316→   316→        </CardTitle>
+   317→   317→   317→      </CardHeader>
+   318→   318→   318→      <CardContent>
+   319→   319→   319→        <div className="flex items-center gap-4">
+   320→   320→   320→          <ResponsiveContainer width={140} height={140}>
+   321→   321→   321→            <PieChart>
+   322→   322→   322→              <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={2}>
+   323→   323→   323→                {pieData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+   324→   324→   324→              </Pie>
+   325→   325→   325→              <RTooltip
+   326→   326→   326→                contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   327→   327→   327→                formatter={(v: any, _n: any, p: any) => [`${v} trade (${p.payload.winRate.toFixed(0)}% win, ${fmtMoney(p.payload.pnl)})`, p.payload.name]}
+   328→   328→   328→              />
+   329→   329→   329→            </PieChart>
+   330→   330→   330→          </ResponsiveContainer>
+   331→   331→   331→          <div className="flex-1 space-y-1.5">
+   332→   332→   332→            {pieData.map((d) => (
+   333→   333→   333→              <div key={d.name} className="flex items-center justify-between text-xs">
+   334→   334→   334→                <span className="flex items-center gap-1.5">
+   335→   335→   335→                  <span className="h-2.5 w-2.5 rounded-sm" style={{ background: d.fill }} />
+   336→   336→   336→                  {d.name}
+   337→   337→   337→                </span>
+   338→   338→   338→                <span className="font-mono tabular text-muted-foreground">
+   339→   339→   339→                  {d.value} ({total > 0 ? ((d.value / total) * 100).toFixed(0) : 0}%)
+   340→   340→   340→                </span>
+   341→   341→   341→              </div>
+   342→   342→   342→            ))}
+   343→   343→   343→          </div>
+   344→   344→   344→        </div>
+   345→   345→   345→      </CardContent>
+   346→   346→   346→    </Card>
+   347→   347→   347→  )
+   348→   348→   348→}
+   349→   349→   349→
+   350→   350→   350→function DailyPnlChart({ data }: { data: { day: string; trades: number; netPnl: number }[] }) {
+   351→   351→   351→  return (
+   352→   352→   352→    <Card className="lg:col-span-2">
+   353→   353→   353→      <CardHeader className="pb-2">
+   354→   354→   354→        <CardTitle className="text-sm flex items-center gap-2">
+   355→   355→   355→          <Calendar className="h-4 w-4 text-emerald-500" />
+   356→   356→   356→          P&L Harian (30 hari terakhir)
+   357→   357→   357→        </CardTitle>
+   358→   358→   358→      </CardHeader>
+   359→   359→   359→      <CardContent>
+   360→   360→   360→        <ResponsiveContainer width="100%" height={180}>
+   361→   361→   361→          <BarChart data={data.map((d) => ({ ...d, label: new Date(d.day).toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }) }))} margin={{ top: 4, right: 8, bottom: 0, left: -10 }}>
+   362→   362→   362→            <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+   363→   363→   363→            <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} minTickGap={20} />
+   364→   364→   364→            <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v.toFixed(0)}`} />
+   365→   365→   365→            <RTooltip
+   366→   366→   366→              contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
+   367→   367→   367→              cursor={{ fill: 'var(--accent)', opacity: 0.3 }}
+   368→   368→   368→              formatter={(v: any, _n, p: any) => [fmtMoney(Number(v)), `P&L (${p.payload.trades} trade)`]}
+   369→   369→   369→            />
+   370→   370→   370→            <Bar dataKey="netPnl" radius={[3, 3, 0, 0]}>
+   371→   371→   371→              {data.map((d, i) => <Cell key={i} fill={d.netPnl >= 0 ? 'var(--bull)' : 'var(--bear)'} />)}
+   372→   372→   372→            </Bar>
+   373→   373→   373→          </BarChart>
+   374→   374→   374→        </ResponsiveContainer>
+   375→   375→   375→      </CardContent>
+   376→   376→   376→    </Card>
+   377→   377→   377→  )
+   378→   378→   378→}
+   379→   379→   379→
+   380→   380→   380→function StreakCard({ analytics }: { analytics: Analytics }) {
+   381→   381→   381→  return (
+   382→   382→   382→    <Card>
+   383→   383→   383→      <CardHeader className="pb-2">
+   384→   384→   384→        <CardTitle className="text-sm flex items-center gap-2">
+   385→   385→   385→          <Flame className="h-4 w-4 text-amber-500" />
+   386→   386→   386→          Streak Analysis
+   387→   387→   387→        </CardTitle>
+   388→   388→   388→      </CardHeader>
+   389→   389→   389→      <CardContent className="space-y-3">
+   390→   390→   390→        <div className="flex items-center justify-between">
+   391→   391→   391→          <span className="text-xs text-muted-foreground">Current Win Streak</span>
+   392→   392→   392→          <Badge className={cn('font-mono', analytics.consecutiveWins > 0 ? 'bg-bull/15 text-bull' : 'bg-muted text-muted-foreground')}>
+   393→   393→   393→            {analytics.consecutiveWins} 🔥
+   394→   394→   394→          </Badge>
+   395→   395→   395→        </div>
+   396→   396→   396→        <div className="flex items-center justify-between">
+   397→   397→   397→          <span className="text-xs text-muted-foreground">Current Loss Streak</span>
+   398→   398→   398→          <Badge className={cn('font-mono', analytics.consecutiveLosses > 0 ? 'bg-bear/15 text-bear' : 'bg-muted text-muted-foreground')}>
+   399→   399→   399→            {analytics.consecutiveLosses} ❄️
+   400→   400→   400→          </Badge>
+   401→   401→   401→        </div>
+   402→   402→   402→        <div className="border-t border-border pt-2 space-y-2">
+   403→   403→   403→          <div className="flex items-center justify-between">
+   404→   404→   404→            <span className="text-xs text-muted-foreground flex items-center gap-1">
+   405→   405→   405→              <Award className="h-3 w-3 text-amber-400" /> Max Win Streak
+   406→   406→   406→            </span>
+   407→   407→   407→            <span className="text-sm font-bold tabular text-bull">{analytics.maxConsecutiveWins}</span>
+   408→   408→   408→          </div>
+   409→   409→   409→          <div className="flex items-center justify-between">
+   410→   410→   410→            <span className="text-xs text-muted-foreground flex items-center gap-1">
+   411→   411→   411→              <TrendingDown className="h-3 w-3 text-rose-400" /> Max Loss Streak
+   412→   412→   412→            </span>
+   413→   413→   413→            <span className="text-sm font-bold tabular text-bear">{analytics.maxConsecutiveLosses}</span>
+   414→   414→   414→          </div>
+   415→   415→   415→        </div>
+   416→   416→   416→      </CardContent>
+   417→   417→   417→    </Card>
+   418→   418→   418→  )
+   419→   419→   419→}
+   420→   420→   420→
+   421→   421→   421→function EmptyChart({ title, icon: Icon }: { title: string; icon: any }) {
+   422→   422→   422→  return (
+   423→   423→   423→    <Card>
+   424→   424→   424→      <CardHeader className="pb-2">
+   425→   425→   425→        <CardTitle className="text-sm">{title}</CardTitle>
+   426→   426→   426→      </CardHeader>
+   427→   427→   427→      <CardContent className="h-[180px] flex items-center justify-center text-sm text-muted-foreground">
+   428→   428→   428→        <div className="text-center">
+   429→   429→   429→          <Icon className="h-8 w-8 mx-auto mb-2 opacity-30" />
+   430→   430→   430→          Belum ada data trade
+   431→   431→   431→        </div>
+   432→   432→   432→      </CardContent>
+   433→   433→   433→    </Card>
+   434→   434→   434→  )
+   435→   435→   435→}
+   436→   436→   436→
+   437→   437→   437→export function AnalyticsPanel() {
+   438→   438→   438→  const [days, setDays] = useState('30')
+   439→   439→   439→  const [exporting, setExporting] = useState(false)
+   440→   440→   440→  const { activeAccountId } = useActiveAccount()
+   441→   441→   441→
+   442→   442→   442→  const { data, isLoading } = useQuery({
+   443→   443→   443→    queryKey: ['analytics', days, activeAccountId],
+   444→   444→   444→    queryFn: () => api.analytics({ days: parseInt(days), accountId: activeAccountId ?? undefined }),
+   445→   445→   445→    refetchInterval: 15000,
+   446→   446→   446→  })
+   447→   447→   447→
+   448→   448→   448→  const a = data?.analytics
+   449→   449→   449→
+   450→   450→   450→  const onExportCsv = async () => {
+   451→   451→   451→    setExporting(true)
+   452→   452→   452→    try {
+   453→   453→   453→      await api.downloadTradesCsv({ status: 'closed' })
+   454→   454→   454→      toast.success('CSV berhasil diunduh', {
+   455→   455→   455→        description: 'Semua trade closed diekspor sebagai CSV (Excel-compatible)',
+   456→   456→   456→      })
+   457→   457→   457→    } catch (e: any) {
+   458→   458→   458→      toast.error('Gagal ekspor CSV', { description: e.message })
+   459→   459→   459→    } finally {
+   460→   460→   460→      setExporting(false)
+   461→   461→   461→    }
+   462→   462→   462→  }
+   463→   463→   463→
+   464→   464→   464→  if (isLoading || !a) {
+   465→   465→   465→    return (
+   466→   466→   466→      <div className="p-4 md:p-6 space-y-4">
+   467→   467→   467→        <div className="h-7 w-64 bg-muted animate-pulse rounded" />
+   468→   468→   468→        <div className="grid gap-4 md:grid-cols-4">
+   469→   469→   469→          {[1, 2, 3, 4].map((i) => <div key={i} className="h-24 bg-muted animate-pulse rounded-xl" />)}
+   470→   470→   470→        </div>
+   471→   471→   471→        <div className="h-64 bg-muted animate-pulse rounded-xl" />
+   472→   472→   472→      </div>
+   473→   473→   473→    )
+   474→   474→   474→  }
+   475→   475→   475→
+   476→   476→   476→  const hasData = a.totalClosed > 0
+   477→   477→   477→
+   478→   478→   478→  return (
+   479→   479→   479→    <div className="p-4 md:p-6 space-y-4 max-w-[1600px] mx-auto">
+   480→   480→   480→      {/* Header */}
+   481→   481→   481→      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+   482→   482→   482→        <div>
+   483→   483→   483→          <h2 className="text-xl font-bold flex items-center gap-2">
+   484→   484→   484→            <BarChart3 className="h-5 w-5 text-emerald-500" />
+   485→   485→   485→            Trade Analytics & Journal
+   486→   486→   486→          </h2>
+   487→   487→   487→          <p className="text-sm text-muted-foreground mt-0.5">
+   488→   488→   488→            Performa trading: win rate, P&L per pair/sesi/sumber, equity curve, streak analysis
+   489→   489→   489→          </p>
+   490→   490→   490→        </div>
+   491→   491→   491→        <div className="flex items-center gap-2">
+   492→   492→   492→          <Button
+   493→   493→   493→            variant="outline"
+   494→   494→   494→            size="sm"
+   495→   495→   495→            onClick={onExportCsv}
+   496→   496→   496→            disabled={exporting || a.totalClosed === 0}
+   497→   497→   497→            className="gap-2 h-9"
+   498→   498→   498→            title="Ekspor semua trade closed sebagai CSV (Excel-compatible)"
+   499→   499→   499→          >
+   500→   500→   500→            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+   501→   501→   501→            <span className="hidden sm:inline">Export CSV</span>
+   502→   502→   502→          </Button>
+   503→   503→   503→          <Select value={days} onValueChange={setDays}>
+   504→   504→   504→            <SelectTrigger className="w-[160px] h-9 text-xs">
+   505→   505→   505→              <SelectValue />
+   506→   506→   506→            </SelectTrigger>
+   507→   507→   507→            <SelectContent>
+   508→   508→   508→              <SelectItem value="7">7 hari terakhir</SelectItem>
+   509→   509→   509→              <SelectItem value="14">14 hari terakhir</SelectItem>
+   510→   510→   510→              <SelectItem value="30">30 hari terakhir</SelectItem>
+   511→   511→   511→              <SelectItem value="90">90 hari terakhir</SelectItem>
+   512→   512→   512→              <SelectItem value="365">1 tahun terakhir</SelectItem>
+   513→   513→   513→            </SelectContent>
+   514→   514→   514→          </Select>
+   515→   515→   515→        </div>
+   516→   516→   516→      </div>
+   517→   517→   517→
+   518→   518→   518→      {/* KPI row */}
+   519→   519→   519→      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+   520→   520→   520→        <KpiCard
+   521→   521→   521→          label="Net Profit"
+   522→   522→   522→          value={fmtMoney(a.netProfit)}
+   523→   523→   523→          sublabel={`${a.totalClosed} trade closed`}
+   524→   524→   524→          icon={DollarSign}
+   525→   525→   525→          color={a.netProfit >= 0 ? 'emerald' : 'rose'}
+   526→   526→   526→          trend={a.netProfit >= 0 ? 'up' : 'down'}
+   527→   527→   527→        />
+   528→   528→   528→        <KpiCard
+   529→   529→   529→          label="Profit Factor"
+   530→   530→   530→          value={a.profitFactor.toFixed(2)}
+   531→   531→   531→          sublabel={a.profitFactor >= 1.5 ? 'Excellent' : a.profitFactor >= 1 ? 'Profitable' : 'Need improvement'}
+   532→   532→   532→          icon={Target}
+   533→   533→   533→          color={a.profitFactor >= 1.5 ? 'emerald' : a.profitFactor >= 1 ? 'amber' : 'rose'}
+   534→   534→   534→        />
+   535→   535→   535→        <KpiCard
+   536→   536→   536→          label="Avg Win / Avg Loss"
+   537→   537→   537→          value={`$${a.avgWin.toFixed(0)} / $${a.avgLoss.toFixed(0)}`}
+   538→   538→   538→          sublabel={`Ratio ${(a.avgLoss > 0 ? a.avgWin / a.avgLoss : 0).toFixed(2)}`}
+   539→   539→   539→          icon={Activity}
+   540→   540→   540→          color="cyan"
+   541→   541→   541→        />
+   542→   542→   542→        <KpiCard
+   543→   543→   543→          label="Avg Hold Time"
+   544→   544→   544→          value={a.avgHoldMinutes < 60 ? `${a.avgHoldMinutes.toFixed(0)}m` : `${(a.avgHoldMinutes / 60).toFixed(1)}h`}
+   545→   545→   545→          sublabel={`Best: ${fmtMoney(a.bestTrade)} · Worst: ${fmtMoney(a.worstTrade)}`}
+   546→   546→   546→          icon={Clock}
+   547→   547→   547→          color="violet"
+   548→   548→   548→        />
+   549→   549→   549→      </div>
+   550→   550→   550→
+   551→   551→   551→      {!hasData && (
+   552→   552→   552→        <Card className="border-amber-500/30 bg-amber-500/[0.04]">
+   553→   553→   553→          <CardContent className="py-8 text-center">
+   554→   554→   554→            <Activity className="h-10 w-10 mx-auto mb-3 text-amber-400 opacity-60" />
+   555→   555→   555→            <p className="text-sm font-medium text-amber-400 mb-1">Belum ada trade yang ditutup</p>
+   556→   556→   556→            <p className="text-xs text-muted-foreground">
+   557→   557→   557→              Buka dan tutup posisi di panel Live Trading untuk mulai mengisi journal analytics.
+   558→   558→   558→              Coba juga jalankan backtest di panel Backtesting untuk melihat simulasi performa.
+   559→   559→   559→            </p>
+   560→   560→   560→          </CardContent>
+   561→   561→   561→        </Card>
+   562→   562→   562→      )}
+   563→   563→   563→
+   564→   564→   564→      {/* Win rate gauge + streak */}
+   565→   565→   565→      <div className="grid gap-4 lg:grid-cols-3">
+   566→   566→   566→        <WinRateGauge winRate={a.winRate} wins={a.wins} losses={a.losses} />
+   567→   567→   567→        <StreakCard analytics={a} />
+   568→   568→   568→        <Card>
+   569→   569→   569→          <CardHeader className="pb-2">
+   570→   570→   570→            <CardTitle className="text-sm flex items-center gap-2">
+   571→   571→   571→              <TrendingUp className="h-4 w-4 text-emerald-500" />
+   572→   572→   572→              Summary
+   573→   573→   573→            </CardTitle>
+   574→   574→   574→          </CardHeader>
+   575→   575→   575→          <CardContent className="space-y-2">
+   576→   576→   576→            <div className="flex justify-between text-xs">
+   577→   577→   577→              <span className="text-muted-foreground">Gross Profit</span>
+   578→   578→   578→              <span className="font-mono font-bold text-bull">{fmtMoney(a.grossProfit)}</span>
+   579→   579→   579→            </div>
+   580→   580→   580→            <div className="flex justify-between text-xs">
+   581→   581→   581→              <span className="text-muted-foreground">Gross Loss</span>
+   582→   582→   582→              <span className="font-mono font-bold text-bear">-{fmtMoney(a.grossLoss)}</span>
+   583→   583→   583→            </div>
+   584→   584→   584→            <div className="flex justify-between text-xs border-t border-border pt-2">
+   585→   585→   585→              <span className="text-muted-foreground">Net Profit</span>
+   586→   586→   586→              <span className={cn('font-mono font-bold', a.netProfit >= 0 ? 'text-bull' : 'text-bear')}>{fmtMoney(a.netProfit)}</span>
+   587→   587→   587→            </div>
+   588→   588→   588→            <div className="flex justify-between text-xs">
+   589→   589→   589→              <span className="text-muted-foreground">Best Trade</span>
+   590→   590→   590→              <span className="font-mono font-bold text-bull">{fmtMoney(a.bestTrade)}</span>
+   591→   591→   591→            </div>
+   592→   592→   592→            <div className="flex justify-between text-xs">
+   593→   593→   593→              <span className="text-muted-foreground">Worst Trade</span>
+   594→   594→   594→              <span className="font-mono font-bold text-bear">{fmtMoney(a.worstTrade)}</span>
+   595→   595→   595→            </div>
+   596→   596→   596→            <div className="flex justify-between text-xs border-t border-border pt-2">
+   597→   597→   597→              <span className="text-muted-foreground">Total Trades</span>
+   598→   598→   598→              <span className="font-mono font-bold">{a.totalClosed}</span>
+   599→   599→   599→            </div>
+   600→   600→   600→            <div className="flex justify-between text-xs">
+   601→   601→   601→              <span className="text-muted-foreground">Win Rate</span>
+   602→   602→   602→              <span className="font-mono font-bold">{a.winRate.toFixed(1)}%</span>
+   603→   603→   603→            </div>
+   604→   604→   604→          </CardContent>
+   605→   605→   605→        </Card>
+   606→   606→   606→      </div>
+   607→   607→   607→
+   608→   608→   608→      {/* Equity curve */}
+   609→   609→   609→      <EquityCurve data={a.equityCurve} />
+   610→   610→   610→
+   611→   611→   611→      {/* Charts grid */}
+   612→   612→   612→      <div className="grid gap-4 lg:grid-cols-2">
+   613→   613→   613→        <ByPairChart data={a.byPair} />
+   614→   614→   614→        <BySessionChart data={a.bySession} />
+   615→   615→   615→      </div>
+   616→   616→   616→
+   617→   617→   617→      <div className="grid gap-4 lg:grid-cols-2">
+   618→   618→   618→        <BySourceChart data={a.bySource} />
+   619→   619→   619→        <PnlDistribution data={a.pnlDistribution} />
+   620→   620→   620→      </div>
+   621→   621→   621→
+   622→   622→   622→      {/* Daily P&L */}
+   623→   623→   623→      <DailyPnlChart data={a.byDay} />
+   624→   624→   624→    </div>
+   625→   625→   625→  )
+   626→   626→   626→}
+   627→   627→   627→

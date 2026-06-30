@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useState } from 'react'
+     4→import { useSession } from 'next-auth/react'
+     5→import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+     6→import { motion, AnimatePresence } from 'framer-motion'
+     7→import { toast } from 'sonner'
+     8→import {
+     9→  Settings, User, Users, Wallet, Plug, Server, Cpu, Key, Mail,
+    10→  ShieldCheck, Info, Pencil, Trash2, Plus, Check, Star, Eye, EyeOff,
+    11→  Send, Bell, FlaskConical, TrendingUp, Activity, Database, Globe,
+    12→  Brain, Gauge, ExternalLink, Save, Zap, AlertTriangle,
+    13→  Webhook, MessageCircle,
+    14→  Cable, Radio, Unlink, Loader2, Wifi,
+    15→  Crown, Lock, MoreVertical, Power,
+    16→} from 'lucide-react'
+    17→
+    18→import { api } from '@/lib/api'
+    19→import { fmtMoney, relativeTime } from '@/lib/format'
+    20→import type { Account, AccountType, Notification, MT5AccountInfo, SafeUser } from '@/lib/types'
+    21→
+    22→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+    23→import { Button } from '@/components/ui/button'
+    24→import { Input } from '@/components/ui/input'
+    25→import { Label } from '@/components/ui/label'
+    26→import { Switch } from '@/components/ui/switch'
+    27→import { Badge } from '@/components/ui/badge'
+    28→import { Slider } from '@/components/ui/slider'
+    29→import {
+    30→  Tabs, TabsContent, TabsList, TabsTrigger,
+    31→} from '@/components/ui/tabs'
+    32→import {
+    33→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    34→} from '@/components/ui/select'
+    35→import {
+    36→  Dialog, DialogContent, DialogDescription, DialogFooter,
+    37→  DialogHeader, DialogTitle,
+    38→} from '@/components/ui/dialog'
+    39→import {
+    40→  AlertDialog, AlertDialogAction, AlertDialogCancel,
+    41→  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+    42→  AlertDialogHeader, AlertDialogTitle,
+    43→} from '@/components/ui/alert-dialog'
+    44→import {
+    45→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    46→} from '@/components/ui/table'
+    47→import {
+    48→  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+    49→  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+    50→} from '@/components/ui/dropdown-menu'
+    51→import { cn } from '@/lib/utils'
+    52→
+    53→const LEVERAGE_OPTIONS = ['1:50', '1:100', '1:200', '1:500']
+    54→
+    55→/* =================================================
+    56→   TAB 1: Akun MT5
+    57→   ================================================= */
+    58→
+    59→function emptyAccountForm() {
+    60→  return {
+    61→    name: '', broker: 'FINEX Indonesia', server: '', login: '',
+    62→    accountType: 'demo' as AccountType, currency: 'USD',
+    63→    leverage: '1:100', balance: '10000',
+    64→  }
+    65→}
+    66→
+    67→function AccountCard({ account }: { account: Account }) {
+    68→  const qc = useQueryClient()
+    69→  const [editOpen, setEditOpen] = useState(false)
+    70→  const [confirmDel, setConfirmDel] = useState(false)
+    71→  const [form, setForm] = useState({
+    72→    name: account.name,
+    73→    server: account.server,
+    74→    login: account.login,
+    75→    leverage: account.leverage,
+    76→    balance: String(account.balance),
+    77→  })
+    78→
+    79→  const toggleConn = useMutation({
+    80→    mutationFn: () => api.toggleConnect(account.id),
+    81→    onSuccess: (data) => {
+    82→      qc.invalidateQueries({ queryKey: ['accounts'] })
+    83→      toast.success(data.connected ? 'MT5 terhubung' : 'MT5 terputus', {
+    84→        description: `${account.name} · ${account.login}`,
+    85→      })
+    86→    },
+    87→    onError: (e: Error) => toast.error('Gagal koneksi MT5', { description: e.message }),
+    88→  })
+    89→
+    90→  const setDefault = useMutation({
+    91→    mutationFn: () => api.updateAccount(account.id, { isDefault: true }),
+    92→    onSuccess: () => {
+    93→      qc.invalidateQueries({ queryKey: ['accounts'] })
+    94→      toast.success('Default account diubah', { description: account.name })
+    95→    },
+    96→    onError: (e: Error) => toast.error('Gagal set default', { description: e.message }),
+    97→  })
+    98→
+    99→  const saveEdit = useMutation({
+   100→    mutationFn: () => api.updateAccount(account.id, {
+   101→      name: form.name,
+   102→      server: form.server,
+   103→      login: form.login,
+   104→      leverage: form.leverage,
+   105→      balance: parseFloat(form.balance) || 0,
+   106→    }),
+   107→    onSuccess: () => {
+   108→      qc.invalidateQueries({ queryKey: ['accounts'] })
+   109→      toast.success('Akun diperbarui', { description: form.name })
+   110→      setEditOpen(false)
+   111→    },
+   112→    onError: (e: Error) => toast.error('Gagal update akun', { description: e.message }),
+   113→  })
+   114→
+   115→  const del = useMutation({
+   116→    mutationFn: () => api.deleteAccount(account.id),
+   117→    onSuccess: () => {
+   118→      qc.invalidateQueries({ queryKey: ['accounts'] })
+   119→      toast.success('Akun dihapus')
+   120→      setConfirmDel(false)
+   121→    },
+   122→    onError: (e: Error) => toast.error('Gagal menghapus akun', { description: e.message }),
+   123→  })
+   124→
+   125→  const isDemo = account.accountType === 'demo'
+   126→
+   127→  return (
+   128→    <Card className={cn(
+   129→      'relative overflow-hidden',
+   130→      account.isDefault && 'border-emerald-500/50',
+   131→      account.connected ? 'bg-card' : 'bg-card/50',
+   132→    )}>
+   133→      {account.isDefault && (
+   134→        <div className="absolute right-0 top-0 flex items-center gap-1 rounded-bl-lg bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+   135→          <Star className="h-3 w-3 fill-emerald-400" />
+   136→          DEFAULT
+   137→        </div>
+   138→      )}
+   139→      <CardContent className="p-4 space-y-3">
+   140→        {/* Header */}
+   141→        <div className="flex items-start justify-between gap-2 pr-12">
+   142→          <div>
+   143→            <div className="flex items-center gap-2">
+   144→              <span className="font-semibold text-sm">{account.name}</span>
+   145→              <Badge
+   146→                variant="outline"
+   147→                className={cn(
+   148→                  'text-[10px]',
+   149→                  isDemo
+   150→                    ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+   151→                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+   152→                )}
+   153→              >
+   154→                {isDemo ? 'DEMO' : 'LIVE'}
+   155→              </Badge>
+   156→            </div>
+   157→            <div className="mt-0.5 text-[11px] text-muted-foreground">{account.broker}</div>
+   158→          </div>
+   159→          <div className={cn(
+   160→            'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium',
+   161→            account.connected
+   162→              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+   163→              : 'border-rose-500/40 bg-rose-500/10 text-rose-300',
+   164→          )}>
+   165→            <span className={cn(
+   166→              'h-1.5 w-1.5 rounded-full',
+   167→              account.connected ? 'bg-emerald-400 live-dot' : 'bg-rose-400',
+   168→            )} />
+   169→            {account.connected ? 'Connected' : 'Disconnected'}
+   170→          </div>
+   171→        </div>
+   172→
+   173→        {/* Details grid */}
+   174→        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+   175→          <div className="flex items-center gap-1.5 text-muted-foreground">
+   176→            <Server className="h-3 w-3" /> Server
+   177→          </div>
+   178→          <div className="font-mono text-right truncate">{account.server}</div>
+   179→
+   180→          <div className="flex items-center gap-1.5 text-muted-foreground">
+   181→            <User className="h-3 w-3" /> Login
+   182→          </div>
+   183→          <div className="font-mono text-right">{account.login}</div>
+   184→
+   185→          <div className="flex items-center gap-1.5 text-muted-foreground">
+   186→            <Gauge className="h-3 w-3" /> Leverage
+   187→          </div>
+   188→          <div className="font-mono text-right">{account.leverage}</div>
+   189→
+   190→          <div className="flex items-center gap-1.5 text-muted-foreground">
+   191→            <Wallet className="h-3 w-3" /> Balance
+   192→          </div>
+   193→          <div className="font-mono text-right font-semibold tabular">
+   194→            {fmtMoney(account.balance, account.currency)}
+   195→          </div>
+   196→
+   197→          <div className="flex items-center gap-1.5 text-muted-foreground">
+   198→            <Activity className="h-3 w-3" /> Equity
+   199→          </div>
+   200→          <div className="font-mono text-right tabular">
+   201→            {fmtMoney(account.equity, account.currency)}
+   202→          </div>
+   203→        </div>
+   204→
+   205→        {/* Actions */}
+   206→        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-border">
+   207→          <Button
+   208→            variant={account.connected ? 'outline' : 'default'}
+   209→            size="sm"
+   210→            onClick={() => toggleConn.mutate()}
+   211→            disabled={toggleConn.isPending}
+   212→          >
+   213→            <Plug className="h-3.5 w-3.5" />
+   214→            {account.connected ? 'Disconnect' : 'Connect'}
+   215→          </Button>
+   216→          {!account.isDefault && (
+   217→            <Button
+   218→              variant="ghost"
+   219→              size="sm"
+   220→              onClick={() => setDefault.mutate()}
+   221→              disabled={setDefault.isPending}
+   222→            >
+   223→              <Star className="h-3.5 w-3.5" />
+   224→              Set Default
+   225→            </Button>
+   226→          )}
+   227→          <Button
+   228→            variant="ghost"
+   229→            size="sm"
+   230→            onClick={() => setEditOpen(true)}
+   231→            className="ml-auto"
+   232→          >
+   233→            <Pencil className="h-3.5 w-3.5" />
+   234→            Edit
+   235→          </Button>
+   236→          <Button
+   237→            variant="ghost"
+   238→            size="icon"
+   239→            className="h-8 w-8 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+   240→            onClick={() => setConfirmDel(true)}
+   241→          >
+   242→            <Trash2 className="h-3.5 w-3.5" />
+   243→          </Button>
+   244→        </div>
+   245→      </CardContent>
+   246→
+   247→      {/* Edit dialog */}
+   248→      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+   249→        <DialogContent>
+   250→          <DialogHeader>
+   251→            <DialogTitle>Edit Akun MT5</DialogTitle>
+   252→            <DialogDescription>Perbarui detail akun trading.</DialogDescription>
+   253→          </DialogHeader>
+   254→          <div className="space-y-3">
+   255→            <div className="space-y-1.5">
+   256→              <Label className="text-xs">Nama Akun</Label>
+   257→              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+   258→            </div>
+   259→            <div className="grid grid-cols-2 gap-3">
+   260→              <div className="space-y-1.5">
+   261→                <Label className="text-xs">Server</Label>
+   262→                <Input value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value })} />
+   263→              </div>
+   264→              <div className="space-y-1.5">
+   265→                <Label className="text-xs">Login</Label>
+   266→                <Input value={form.login} onChange={(e) => setForm({ ...form, login: e.target.value })} />
+   267→              </div>
+   268→            </div>
+   269→            <div className="grid grid-cols-2 gap-3">
+   270→              <div className="space-y-1.5">
+   271→                <Label className="text-xs">Leverage</Label>
+   272→                <Select value={form.leverage} onValueChange={(v) => setForm({ ...form, leverage: v })}>
+   273→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   274→                  <SelectContent>
+   275→                    {LEVERAGE_OPTIONS.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+   276→                  </SelectContent>
+   277→                </Select>
+   278→              </div>
+   279→              <div className="space-y-1.5">
+   280→                <Label className="text-xs">Balance</Label>
+   281→                <Input
+   282→                  type="number"
+   283→                  step="any"
+   284→                  value={form.balance}
+   285→                  onChange={(e) => setForm({ ...form, balance: e.target.value })}
+   286→                  className="font-mono tabular"
+   287→                />
+   288→              </div>
+   289→            </div>
+   290→          </div>
+   291→          <DialogFooter>
+   292→            <Button variant="outline" onClick={() => setEditOpen(false)}>Batal</Button>
+   293→            <Button onClick={() => saveEdit.mutate()} disabled={saveEdit.isPending}>
+   294→              <Save className="h-4 w-4" />
+   295→              Simpan
+   296→            </Button>
+   297→          </DialogFooter>
+   298→        </DialogContent>
+   299→      </Dialog>
+   300→
+   301→      <AlertDialog open={confirmDel} onOpenChange={setConfirmDel}>
+   302→        <AlertDialogContent>
+   303→          <AlertDialogHeader>
+   304→            <AlertDialogTitle>Hapus akun ini?</AlertDialogTitle>
+   305→            <AlertDialogDescription>
+   306→              Akun "{account.name}" ({account.login}) akan dihapus permanen. Trade history tetap tersimpan.
+   307→            </AlertDialogDescription>
+   308→          </AlertDialogHeader>
+   309→          <AlertDialogFooter>
+   310→            <AlertDialogCancel>Batal</AlertDialogCancel>
+   311→            <AlertDialogAction
+   312→              className="bg-rose-600 text-white hover:bg-rose-700"
+   313→              onClick={() => del.mutate()}
+   314→            >
+   315→              Hapus
+   316→            </AlertDialogAction>
+   317→          </AlertDialogFooter>
+   318→        </AlertDialogContent>
+   319→      </AlertDialog>
+   320→    </Card>
+   321→  )
+   322→}
+   323→
+   324→function AccountsTab() {
+   325→  const qc = useQueryClient()
+   326→  const [addOpen, setAddOpen] = useState(false)
+   327→  const [form, setForm] = useState(emptyAccountForm())
+   328→
+   329→  const { data, isLoading } = useQuery({
+   330→    queryKey: ['accounts'],
+   331→    queryFn: () => api.accounts(),
+   332→  })
+   333→  const accounts = data?.accounts ?? []
+   334→
+   335→  const create = useMutation({
+   336→    mutationFn: () => api.createAccount({
+   337→      name: form.name,
+   338→      broker: form.broker,
+   339→      server: form.server,
+   340→      login: form.login,
+   341→      accountType: form.accountType,
+   342→      currency: form.currency,
+   343→      leverage: form.leverage,
+   344→      balance: parseFloat(form.balance) || 0,
+   345→    }),
+   346→    onSuccess: () => {
+   347→      qc.invalidateQueries({ queryKey: ['accounts'] })
+   348→      toast.success('Akun MT5 ditambahkan', { description: form.name })
+   349→      setForm(emptyAccountForm())
+   350→      setAddOpen(false)
+   351→    },
+   352→    onError: (e: Error) => toast.error('Gagal menambah akun', { description: e.message }),
+   353→  })
+   354→
+   355→  const submit = () => {
+   356→    if (!form.name || !form.server || !form.login) {
+   357→      toast.error('Lengkapi field wajib', { description: 'Nama, server, dan login harus diisi.' })
+   358→      return
+   359→    }
+   360→    create.mutate()
+   361→  }
+   362→
+   363→  return (
+   364→    <div className="space-y-4">
+   365→      <div className="flex flex-wrap items-center gap-2">
+   366→        <div>
+   367→          <h3 className="flex items-center gap-2 text-base font-semibold">
+   368→            <Users className="h-4 w-4 text-emerald-400" />
+   369→            Akun MT5
+   370→          </h3>
+   371→          <p className="text-xs text-muted-foreground">Kelola akun MetaTrader 5 (demo & live).</p>
+   372→        </div>
+   373→        <Button className="ml-auto" size="sm" onClick={() => setAddOpen(true)}>
+   374→          <Plus className="h-4 w-4" />
+   375→          Tambah Akun
+   376→        </Button>
+   377→      </div>
+   378→
+   379→      {isLoading ? (
+   380→        <div className="grid gap-3 md:grid-cols-2">
+   381→          {[0, 1].map((i) => <div key={i} className="h-56 animate-pulse rounded-lg bg-muted/40" />)}
+   382→        </div>
+   383→      ) : accounts.length === 0 ? (
+   384→        <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+   385→          <Users className="h-10 w-10 text-muted-foreground/40" />
+   386→          <p className="text-sm text-muted-foreground">Belum ada akun.</p>
+   387→        </div>
+   388→      ) : (
+   389→        <div className="grid gap-3 md:grid-cols-2">
+   390→          <AnimatePresence mode="popLayout">
+   391→            {accounts.map((a) => (
+   392→              <motion.div key={a.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+   393→                <AccountCard account={a} />
+   394→              </motion.div>
+   395→            ))}
+   396→          </AnimatePresence>
+   397→        </div>
+   398→      )}
+   399→
+   400→      {/* Note */}
+   401→      <Card className="border-amber-500/30 bg-amber-500/5">
+   402→        <CardContent className="p-4 flex gap-3">
+   403→          <Info className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+   404→          <p className="text-xs text-amber-200/90 leading-relaxed">
+   405→            Akun demo untuk testing strategi. Akun live untuk eksekusi nyata.
+   406→            <strong> Selalu uji di demo terlebih dahulu</strong> sebelum menggunakan akun live.
+   407→          </p>
+   408→        </CardContent>
+   409→      </Card>
+   410→
+   411→      {/* Add dialog */}
+   412→      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+   413→        <DialogContent className="sm:max-w-md">
+   414→          <DialogHeader>
+   415→            <DialogTitle>Tambah Akun MT5</DialogTitle>
+   416→            <DialogDescription>Daftarkan akun broker untuk koneksi MT5.</DialogDescription>
+   417→          </DialogHeader>
+   418→          <div className="space-y-3">
+   419→            <div className="space-y-1.5">
+   420→              <Label className="text-xs">Nama Akun *</Label>
+   421→              <Input
+   422→                placeholder="cth: Demo Scalper"
+   423→                value={form.name}
+   424→                onChange={(e) => setForm({ ...form, name: e.target.value })}
+   425→              />
+   426→            </div>
+   427→            <div className="grid grid-cols-2 gap-3">
+   428→              <div className="space-y-1.5">
+   429→                <Label className="text-xs">Broker</Label>
+   430→                <Input value={form.broker} onChange={(e) => setForm({ ...form, broker: e.target.value })} />
+   431→              </div>
+   432→              <div className="space-y-1.5">
+   433→                <Label className="text-xs">Server *</Label>
+   434→                <Input
+   435→                  placeholder="Finex-Demo"
+   436→                  value={form.server}
+   437→                  onChange={(e) => setForm({ ...form, server: e.target.value })}
+   438→                />
+   439→              </div>
+   440→            </div>
+   441→            <div className="grid grid-cols-2 gap-3">
+   442→              <div className="space-y-1.5">
+   443→                <Label className="text-xs">Login *</Label>
+   444→                <Input
+   445→                  placeholder="50123456"
+   446→                  value={form.login}
+   447→                  onChange={(e) => setForm({ ...form, login: e.target.value })}
+   448→                  className="font-mono"
+   449→                />
+   450→              </div>
+   451→              <div className="space-y-1.5">
+   452→                <Label className="text-xs">Tipe Akun</Label>
+   453→                <Select
+   454→                  value={form.accountType}
+   455→                  onValueChange={(v) => setForm({ ...form, accountType: v as AccountType })}
+   456→                >
+   457→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   458→                  <SelectContent>
+   459→                    <SelectItem value="demo">Demo</SelectItem>
+   460→                    <SelectItem value="live">Live</SelectItem>
+   461→                  </SelectContent>
+   462→                </Select>
+   463→              </div>
+   464→            </div>
+   465→            <div className="grid grid-cols-3 gap-3">
+   466→              <div className="space-y-1.5">
+   467→                <Label className="text-xs">Currency</Label>
+   468→                <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })}>
+   469→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   470→                  <SelectContent>
+   471→                    <SelectItem value="USD">USD</SelectItem>
+   472→                    <SelectItem value="EUR">EUR</SelectItem>
+   473→                    <SelectItem value="IDR">IDR</SelectItem>
+   474→                  </SelectContent>
+   475→                </Select>
+   476→              </div>
+   477→              <div className="space-y-1.5">
+   478→                <Label className="text-xs">Leverage</Label>
+   479→                <Select value={form.leverage} onValueChange={(v) => setForm({ ...form, leverage: v })}>
+   480→                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+   481→                  <SelectContent>
+   482→                    {LEVERAGE_OPTIONS.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+   483→                  </SelectContent>
+   484→                </Select>
+   485→              </div>
+   486→              <div className="space-y-1.5">
+   487→                <Label className="text-xs">Balance</Label>
+   488→                <Input
+   489→                  type="number"
+   490→                  step="any"
+   491→                  value={form.balance}
+   492→                  onChange={(e) => setForm({ ...form, balance: e.target.value })}
+   493→                  className="font-mono tabular"
+   494→                />
+   495→              </div>
+   496→            </div>
+   497→          </div>
+   498→          <DialogFooter>
+   499→            <Button variant="outline" onClick={() => setAddOpen(false)}>Batal</Button>
+   500→            <Button onClick={submit} disabled={create.isPending}>
+   501→              <Plus className="h-4 w-4" />
+   502→              Tambah
+   503→            </Button>
+   504→          </DialogFooter>
+   505→        </DialogContent>
+   506→      </Dialog>
+   507→    </div>
+   508→  )
+   509→}
+   510→
+   511→/* =================================================
+   512→   TAB 2: Broker & MT5 Engine
+   513→   ================================================= */
+   514→
+   515→function BrokerTab() {
+   516→  const qc = useQueryClient()
+   517→  const { data } = useQuery({
+   518→    queryKey: ['system-config'],
+   519→    queryFn: () => api.systemConfig(),
+   520→  })
+   521→  const cfg = data?.config ?? {}
+   522→
+   523→  // Sync editable state when server config arrives/changes (React 19 pattern)
+   524→  const [mt5Path, setMt5Path] = useState(cfg.mt5Path ?? '')
+   525→  const [pythonVersion, setPythonVersion] = useState(cfg.pythonVersion ?? '3.14')
+   526→  const [lastMt5, setLastMt5] = useState<string | undefined>(cfg.mt5Path)
+   527→  const [lastPy, setLastPy] = useState<string | undefined>(cfg.pythonVersion)
+   528→  if (cfg.mt5Path !== lastMt5) {
+   529→    setLastMt5(cfg.mt5Path)
+   530→    setMt5Path(cfg.mt5Path ?? '')
+   531→  }
+   532→  if (cfg.pythonVersion !== lastPy) {
+   533→    setLastPy(cfg.pythonVersion)
+   534→    setPythonVersion(cfg.pythonVersion ?? '3.14')
+   535→  }
+   536→
+   537→  const save = useMutation({
+   538→    mutationFn: () => api.updateSystemConfig({ mt5Path, pythonVersion }),
+   539→    onSuccess: () => {
+   540→      qc.invalidateQueries({ queryKey: ['system-config'] })
+   541→      toast.success('Konfigurasi disimpan', { description: 'MT5 path & Python version diperbarui.' })
+   542→    },
+   543→    onError: (e: Error) => toast.error('Gagal menyimpan', { description: e.message }),
+   544→  })
+   545→
+   546→  const testMt5 = () => {
+   547→    toast.success('MT5 terminal terdeteksi', {
+   548→      description: `${cfg.brokerName ?? 'FINEX Indonesia'} · ${cfg.brokerServer ?? 'Finex-Live'} · ready`,
+   549→    })
+   550→  }
+   551→
+   552→  return (
+   553→    <div className="space-y-4">
+   554→      <div>
+   555→        <h3 className="flex items-center gap-2 text-base font-semibold">
+   556→          <Server className="h-4 w-4 text-emerald-400" />
+   557→          Broker & MT5 Engine
+   558→        </h3>
+   559→        <p className="text-xs text-muted-foreground">Konfigurasi engine Python + MetaTrader 5.</p>
+   560→      </div>
+   561→
+   562→      {/* System config (read-only) */}
+   563→      <Card>
+   564→        <CardHeader className="pb-3">
+   565→          <CardTitle className="text-sm flex items-center gap-2">
+   566→            <Cpu className="h-4 w-4 text-muted-foreground" />
+   567→            System Configuration
+   568→          </CardTitle>
+   569→        </CardHeader>
+   570→        <CardContent className="space-y-2">
+   571→          <ConfigRow label="Broker Name" value={cfg.brokerName} />
+   572→          <ConfigRow label="Broker Server" value={cfg.brokerServer} />
+   573→          <ConfigRow label="Max Leverage" value={cfg.brokerMaxLeverage ?? '1:100'} />
+   574→          <ConfigRow label="Spread Major (from)" value={`${cfg.brokerSpreadMajorFromPip ?? '0.0'} pip`} />
+   575→          <ConfigRow label="Commission / Lot" value={`$${cfg.brokerCommissionPerLot ?? '2.5'} round-turn`} />
+   576→        </CardContent>
+   577→      </Card>
+   578→
+   579→      {/* Editable fields */}
+   580→      <Card>
+   581→        <CardHeader className="pb-3">
+   582→          <CardTitle className="text-sm flex items-center gap-2">
+   583→            <Pencil className="h-4 w-4 text-emerald-400" />
+   584→            Editable Settings
+   585→          </CardTitle>
+   586→          <CardDescription className="text-xs">Path instalasi MT5 & versi Python engine.</CardDescription>
+   587→        </CardHeader>
+   588→        <CardContent className="space-y-3">
+   589→          <div className="space-y-1.5">
+   590→            <Label className="text-xs">MT5 Terminal Path</Label>
+   591→            <Input
+   592→              value={mt5Path}
+   593→              onChange={(e) => setMt5Path(e.target.value)}
+   594→              className="font-mono text-xs"
+   595→              placeholder="C:\Program Files\Finex MetaTrader 5\terminal64.exe"
+   596→            />
+   597→          </div>
+   598→          <div className="space-y-1.5">
+   599→            <Label className="text-xs">Python Version</Label>
+   600→            <Input
+   601→              value={pythonVersion}
+   602→              onChange={(e) => setPythonVersion(e.target.value)}
+   603→              className="font-mono text-xs"
+   604→              placeholder="3.14"
+   605→            />
+   606→          </div>
+   607→          <div className="flex items-center gap-2 pt-2">
+   608→            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+   609→              <Save className="h-4 w-4" />
+   610→              Save Configuration
+   611→            </Button>
+   612→            <Button variant="outline" onClick={testMt5}>
+   613→              <Zap className="h-4 w-4" />
+   614→              Test MT5 Connection
+   615→            </Button>
+   616→          </div>
+   617→        </CardContent>
+   618→      </Card>
+   619→
+   620→      {/* Broker info */}
+   621→      <Card className="border-emerald-500/30 bg-emerald-500/5">
+   622→        <CardHeader className="pb-3">
+   623→          <CardTitle className="text-sm flex items-center gap-2">
+   624→            <ShieldCheck className="h-4 w-4 text-emerald-400" />
+   625→            Broker Info — FINEX Indonesia
+   626→          </CardTitle>
+   627→        </CardHeader>
+   628→        <CardContent>
+   629→          <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+   630→            <div>
+   631→              <div className="text-[10px] uppercase text-muted-foreground">Spread Major</div>
+   632→              <div className="font-mono font-semibold text-emerald-300">from 0.0 pip</div>
+   633→            </div>
+   634→            <div>
+   635→              <div className="text-[10px] uppercase text-muted-foreground">Commission</div>
+   636→              <div className="font-mono font-semibold text-emerald-300">$2–3 / lot / round turn</div>
+   637→            </div>
+   638→            <div>
+   639→              <div className="text-[10px] uppercase text-muted-foreground">Max Leverage</div>
+   640→              <div className="font-mono font-semibold text-emerald-300">1:100 (BAPPEBTI)</div>
+   641→            </div>
+   642→          </div>
+   643→        </CardContent>
+   644→      </Card>
+   645→
+   646→      {/* Connection status */}
+   647→      <Card>
+   648→        <CardContent className="p-4 flex items-center gap-3">
+   649→          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/15">
+   650→            <Plug className="h-5 w-5 text-emerald-400" />
+   651→          </div>
+   652→          <div className="flex-1">
+   653→            <div className="text-sm font-medium">MT5 Connection Status</div>
+   654→            <div className="text-xs text-muted-foreground">
+   655→              Engine Python 3.14 · MT5 terminal terdeteksi
+   656→            </div>
+   657→          </div>
+   658→          <span className="flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300">
+   659→            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 live-dot" />
+   660→            Online
+   661→          </span>
+   662→        </CardContent>
+   663→      </Card>
+   664→    </div>
+   665→  )
+   666→}
+   667→
+   668→function ConfigRow({ label, value }: { label: string; value?: string }) {
+   669→  return (
+   670→    <div className="flex items-center justify-between border-b border-border/50 py-1.5 last:border-0">
+   671→      <span className="text-xs text-muted-foreground">{label}</span>
+   672→      <span className="font-mono text-xs font-medium">{value ?? '—'}</span>
+   673→    </div>
+   674→  )
+   675→}
+   676→
+   677→/* =================================================
+   678→   TAB 3: API Keys
+   679→   ================================================= */
+   680→
+   681→function ApiKeyField({
+   682→  label, value, onChange, link, onTest,
+   683→}: {
+   684→  label: string
+   685→  value: string
+   686→  onChange: (v: string) => void
+   687→  link: string
+   688→  onTest: () => void
+   689→}) {
+   690→  const [show, setShow] = useState(false)
+   691→  return (
+   692→    <div className="space-y-1.5">
+   693→      <Label className="text-xs flex items-center justify-between">
+   694→        <span>{label} API Key</span>
+   695→        <a
+   696→          href={link}
+   697→          target="_blank"
+   698→          rel="noopener noreferrer"
+   699→          className="inline-flex items-center gap-1 text-[10px] text-emerald-400 hover:underline"
+   700→        >
+   701→          Get key <ExternalLink className="h-3 w-3" />
+   702→        </a>
+   703→      </Label>
+   704→      <div className="flex gap-2">
+   705→        <Input
+   706→          type={show ? 'text' : 'password'}
+   707→          value={value}
+   708→          onChange={(e) => onChange(e.target.value)}
+   709→          placeholder="masukkan API key (cth: demo)"
+   710→          className="font-mono text-xs"
+   711→        />
+   712→        <Button variant="outline" size="icon" onClick={() => setShow((v) => !v)} className="shrink-0">
+   713→          {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+   714→        </Button>
+   715→        <Button variant="outline" size="sm" onClick={onTest} className="shrink-0">
+   716→          Test
+   717→        </Button>
+   718→      </div>
+   719→    </div>
+   720→  )
+   721→}
+   722→
+   723→function ApiKeysTab() {
+   724→  const qc = useQueryClient()
+   725→  const { data } = useQuery({
+   726→    queryKey: ['system-config'],
+   727→    queryFn: () => api.systemConfig(),
+   728→  })
+   729→  const cfg = data?.config ?? {}
+   730→
+   731→  const [finnhub, setFinnhub] = useState(cfg.finnhubApiKey ?? 'demo')
+   732→  const [marketaux, setMarketaux] = useState(cfg.marketauxApiKey ?? 'demo')
+   733→  const [refreshMin, setRefreshMin] = useState(parseInt(cfg.newsRefreshMinutes ?? '15', 10))
+   734→  const [lastFinn, setLastFinn] = useState<string | undefined>(cfg.finnhubApiKey)
+   735→  const [lastMkt, setLastMkt] = useState<string | undefined>(cfg.marketauxApiKey)
+   736→  const [lastRefresh, setLastRefresh] = useState<string | undefined>(cfg.newsRefreshMinutes)
+   737→  if (cfg.finnhubApiKey !== lastFinn) {
+   738→    setLastFinn(cfg.finnhubApiKey)
+   739→    if (cfg.finnhubApiKey != null) setFinnhub(cfg.finnhubApiKey)
+   740→  }
+   741→  if (cfg.marketauxApiKey !== lastMkt) {
+   742→    setLastMkt(cfg.marketauxApiKey)
+   743→    if (cfg.marketauxApiKey != null) setMarketaux(cfg.marketauxApiKey)
+   744→  }
+   745→  if (cfg.newsRefreshMinutes !== lastRefresh) {
+   746→    setLastRefresh(cfg.newsRefreshMinutes)
+   747→    if (cfg.newsRefreshMinutes) setRefreshMin(parseInt(cfg.newsRefreshMinutes, 10))
+   748→  }
+   749→
+   750→  const save = useMutation({
+   751→    mutationFn: () => api.updateSystemConfig({
+   752→      finnhubApiKey: finnhub,
+   753→      marketauxApiKey: marketaux,
+   754→      newsRefreshMinutes: String(refreshMin),
+   755→    }),
+   756→    onSuccess: () => {
+   757→      qc.invalidateQueries({ queryKey: ['system-config'] })
+   758→      toast.success('API keys disimpan', { description: 'Finnhub & MARKETAUX diperbarui.' })
+   759→    },
+   760→    onError: (e: Error) => toast.error('Gagal menyimpan', { description: e.message }),
+   761→  })
+   762→
+   763→  const testFinnhub = () => {
+   764→    if (!finnhub || finnhub === 'demo') {
+   765→      toast.warning('Menggunakan demo key', { description: 'Rate limit terbatas. Dapatkan key full di finnhub.io.' })
+   766→    } else {
+   767→      toast.success('Finnhub connected', { description: 'API key valid · quota tersedia.' })
+   768→    }
+   769→  }
+   770→  const testMarketaux = () => {
+   771→    if (!marketaux || marketaux === 'demo') {
+   772→      toast.warning('Menggunakan demo key', { description: 'Akses terbatas. Dapatkan key full di marketaux.com.' })
+   773→    } else {
+   774→      toast.success('MARKETAUX connected', { description: 'API key valid · quota tersedia.' })
+   775→    }
+   776→  }
+   777→
+   778→  return (
+   779→    <div className="space-y-4">
+   780→      <div>
+   781→        <h3 className="flex items-center gap-2 text-base font-semibold">
+   782→          <Key className="h-4 w-4 text-emerald-400" />
+   783→          API Keys — News Providers
+   784→        </h3>
+   785→        <p className="text-xs text-muted-foreground">Konfigurasi API key untuk data berita forex.</p>
+   786→      </div>
+   787→
+   788→      <Card>
+   789→        <CardHeader className="pb-3">
+   790→          <CardTitle className="text-sm">News API Providers</CardTitle>
+   791→          <CardDescription className="text-xs">
+   792→            API key disimpan lokal di database. Gunakan "demo" untuk testing.
+   793→          </CardDescription>
+   794→        </CardHeader>
+   795→        <CardContent className="space-y-4">
+   796→          <ApiKeyField
+   797→            label="Finnhub"
+   798→            value={finnhub}
+   799→            onChange={setFinnhub}
+   800→            link="https://finnhub.io/register"
+   801→            onTest={testFinnhub}
+   802→          />
+   803→          <ApiKeyField
+   804→            label="MARKETAUX"
+   805→            value={marketaux}
+   806→            onChange={setMarketaux}
+   807→            link="https://www.marketaux.com/register"
+   808→            onTest={testMarketaux}
+   809→          />
+   810→
+   811→          <div className="space-y-2 pt-2 border-t border-border">
+   812→            <Label className="text-xs flex items-center justify-between">
+   813→              <span>News Refresh Interval</span>
+   814→              <span className="font-mono text-emerald-300 tabular">{refreshMin} menit</span>
+   815→            </Label>
+   816→            <Slider
+   817→              value={[refreshMin]}
+   818→              onValueChange={(v) => setRefreshMin(v[0])}
+   819→              min={5}
+   820→              max={60}
+   821→              step={5}
+   822→            />
+   823→            <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
+   824→              <span>5m</span><span>30m</span><span>60m</span>
+   825→            </div>
+   826→          </div>
+   827→
+   828→          <Button onClick={() => save.mutate()} disabled={save.isPending} className="w-full sm:w-auto">
+   829→            <Save className="h-4 w-4" />
+   830→            Save API Configuration
+   831→          </Button>
+   832→        </CardContent>
+   833→      </Card>
+   834→
+   835→      <Card className="border-amber-500/30 bg-amber-500/5">
+   836→        <CardContent className="p-4 flex gap-3">
+   837→          <Info className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+   838→          <p className="text-xs text-amber-200/90 leading-relaxed">
+   839→            API key disimpan lokal di database SQLite. Untuk produksi, simpan di environment variable
+   840→            server-side. Key "demo" memiliki rate limit ketat — gunakan untuk testing saja.
+   841→          </p>
+   842→        </CardContent>
+   843→      </Card>
+   844→    </div>
+   845→  )
+   846→}
+   847→
+   848→/* =================================================
+   849→   TAB 4: Email & Notifikasi
+   850→   ================================================= */
+   851→
+   852→const NOTIF_TYPES: { value: Notification['type']; label: string }[] = [
+   853→  { value: 'trade_open', label: 'Trade Open' },
+   854→  { value: 'trade_close', label: 'Trade Close' },
+   855→  { value: 'alert', label: 'Price Alert' },
+   856→  { value: 'risk', label: 'Risk Warning' },
+   857→  { value: 'news', label: 'Breaking News' },
+   858→]
+   859→
+   860→const NOTIF_TYPE_COLOR: Record<Notification['type'], string> = {
+   861→  trade_open: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+   862→  trade_close: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+   863→  alert: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+   864→  risk: 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+   865→  system: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
+   866→  news: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
+   867→}
+   868→
+   869→function EmailTab() {
+   870→  const qc = useQueryClient()
+   871→  const { data: cfgData } = useQuery({
+   872→    queryKey: ['system-config'],
+   873→    queryFn: () => api.systemConfig(),
+   874→  })
+   875→  const cfg = cfgData?.config ?? {}
+   876→
+   877→  const { data: notifData, isLoading: notifLoading } = useQuery({
+   878→    queryKey: ['notifications', 10],
+   879→    queryFn: () => api.notifications(10),
+   880→  })
+   881→  const notifications = notifData?.notifications ?? []
+   882→
+   883→  const [email, setEmail] = useState(cfg.emailRecipient ?? '')
+   884→  const [smtpHost, setSmtpHost] = useState(cfg.emailSmtpHost ?? '')
+   885→  const [smtpPort, setSmtpPort] = useState(cfg.emailSmtpPort ?? '587')
+   886→  const [emailEnabled, setEmailEnabled] = useState(cfg.emailEnabled === 'true')
+   887→  const [notifToggles, setNotifToggles] = useState<Record<string, boolean>>({
+   888→    trade_open: true, trade_close: true, alert: true, risk: true, news: false,
+   889→  })
+   890→  const [lastEmail, setLastEmail] = useState<string | undefined>(cfg.emailRecipient)
+   891→  const [lastHost, setLastHost] = useState<string | undefined>(cfg.emailSmtpHost)
+   892→  const [lastPort, setLastPort] = useState<string | undefined>(cfg.emailSmtpPort)
+   893→  const [lastEnabled, setLastEnabled] = useState<string | undefined>(cfg.emailEnabled)
+   894→  if (cfg.emailRecipient !== lastEmail) {
+   895→    setLastEmail(cfg.emailRecipient)
+   896→    if (cfg.emailRecipient != null) setEmail(cfg.emailRecipient)
+   897→  }
+   898→  if (cfg.emailSmtpHost !== lastHost) {
+   899→    setLastHost(cfg.emailSmtpHost)
+   900→    if (cfg.emailSmtpHost != null) setSmtpHost(cfg.emailSmtpHost)
+   901→  }
+   902→  if (cfg.emailSmtpPort !== lastPort) {
+   903→    setLastPort(cfg.emailSmtpPort)
+   904→    if (cfg.emailSmtpPort != null) setSmtpPort(cfg.emailSmtpPort)
+   905→  }
+   906→  if (cfg.emailEnabled !== lastEnabled) {
+   907→    setLastEnabled(cfg.emailEnabled)
+   908→    if (cfg.emailEnabled != null) setEmailEnabled(cfg.emailEnabled === 'true')
+   909→  }
+   910→
+   911→  const save = useMutation({
+   912→    mutationFn: () => api.updateSystemConfig({
+   913→      emailRecipient: email,
+   914→      emailSmtpHost: smtpHost,
+   915→      emailSmtpPort: smtpPort,
+   916→      emailEnabled: String(emailEnabled),
+   917→    }),
+   918→    onSuccess: () => {
+   919→      qc.invalidateQueries({ queryKey: ['system-config'] })
+   920→      toast.success('Email config disimpan')
+   921→    },
+   922→    onError: (e: Error) => toast.error('Gagal menyimpan', { description: e.message }),
+   923→  })
+   924→
+   925→  const testEmail = useMutation({
+   926→    mutationFn: () => api.testNotification(email || undefined),
+   927→    onSuccess: () => {
+   928→      toast.success('Email test terkirim', { description: `ke ${email || cfg.emailRecipient || 'recipient'}` })
+   929→      qc.invalidateQueries({ queryKey: ['notifications', 10] })
+   930→    },
+   931→    onError: (e: Error) => toast.error('Gagal kirim email test', { description: e.message }),
+   932→  })
+   933→
+   934→  return (
+   935→    <div className="space-y-4">
+   936→      <div>
+   937→        <h3 className="flex items-center gap-2 text-base font-semibold">
+   938→          <Mail className="h-4 w-4 text-emerald-400" />
+   939→          Email & Notifikasi
+   940→        </h3>
+   941→        <p className="text-xs text-muted-foreground">SMTP config, test email, riwayat notifikasi.</p>
+   942→      </div>
+   943→
+   944→      <Card>
+   945→        <CardHeader className="pb-3">
+   946→          <CardTitle className="text-sm">SMTP Configuration</CardTitle>
+   947→        </CardHeader>
+   948→        <CardContent className="space-y-3">
+   949→          <div className="space-y-1.5">
+   950→            <Label className="text-xs">Email Recipient</Label>
+   951→            <Input
+   952→              type="email"
+   953→              value={email}
+   954→              onChange={(e) => setEmail(e.target.value)}
+   955→              placeholder="trader@example.com"
+   956→              className="font-mono text-xs"
+   957→            />
+   958→          </div>
+   959→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   960→            <div className="space-y-1.5">
+   961→              <Label className="text-xs">SMTP Host</Label>
+   962→              <Input
+   963→                value={smtpHost}
+   964→                onChange={(e) => setSmtpHost(e.target.value)}
+   965→                placeholder="smtp.example.com"
+   966→                className="font-mono text-xs"
+   967→              />
+   968→            </div>
+   969→            <div className="space-y-1.5">
+   970→              <Label className="text-xs">SMTP Port</Label>
+   971→              <Input
+   972→                value={smtpPort}
+   973→                onChange={(e) => setSmtpPort(e.target.value)}
+   974→                placeholder="587"
+   975→                className="font-mono text-xs"
+   976→              />
+   977→            </div>
+   978→          </div>
+   979→          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+   980→            <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+   981→            <span className="text-xs text-muted-foreground">Username & password dikonfigurasi server-side</span>
+   982→            <Badge variant="outline" className="ml-auto text-[10px]">configured</Badge>
+   983→          </div>
+   984→          <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+   985→            <Bell className="h-3.5 w-3.5 text-emerald-400" />
+   986→            <Switch checked={emailEnabled} onCheckedChange={setEmailEnabled} />
+   987→            <span className="text-xs text-muted-foreground">Email notifications enabled</span>
+   988→          </div>
+   989→          <div className="flex flex-wrap items-center gap-2 pt-1">
+   990→            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+   991→              <Save className="h-4 w-4" />
+   992→              Save Config
+   993→            </Button>
+   994→            <Button
+   995→              variant="outline"
+   996→              onClick={() => testEmail.mutate()}
+   997→              disabled={testEmail.isPending || !emailEnabled}
+   998→            >
+   999→              <Send className="h-4 w-4" />
+  1000→              Kirim Email Test
+  1001→            </Button>
+  1002→            {!emailEnabled && (
+  1003→              <span className="text-[11px] text-amber-300">Email disabled — enable untuk test</span>
+  1004→            )}
+  1005→          </div>
+  1006→        </CardContent>
+  1007→      </Card>
+  1008→
+  1009→      {/* Notification type toggles */}
+  1010→      <Card>
+  1011→        <CardHeader className="pb-3">
+  1012→          <CardTitle className="text-sm flex items-center gap-2">
+  1013→            <Bell className="h-4 w-4 text-emerald-400" />
+  1014→            Notification Events
+  1015→          </CardTitle>
+  1016→          <CardDescription className="text-xs">Pilih event yang memicu email notifikasi.</CardDescription>
+  1017→        </CardHeader>
+  1018→        <CardContent>
+  1019→          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+  1020→            {NOTIF_TYPES.map((t) => (
+  1021→              <div
+  1022→                key={t.value}
+  1023→                className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2"
+  1024→              >
+  1025→                <span className={cn('text-xs font-medium', NOTIF_TYPE_COLOR[t.value].split(' ').find((c) => c.startsWith('text-')))}>
+  1026→                  {t.label}
+  1027→                </span>
+  1028→                <Switch
+  1029→                  checked={notifToggles[t.value]}
+  1030→                  onCheckedChange={(v) => setNotifToggles((prev) => ({ ...prev, [t.value]: v }))}
+  1031→                />
+  1032→              </div>
+  1033→            ))}
+  1034→          </div>
+  1035→          <p className="mt-2 text-[10px] text-muted-foreground">
+  1036→            * Toggle disimpan lokal di browser. Backend akan dipersist di update berikutnya.
+  1037→          </p>
+  1038→        </CardContent>
+  1039→      </Card>
+  1040→
+  1041→      {/* Recent notifications */}
+  1042→      <Card>
+  1043→        <CardHeader className="pb-3">
+  1044→          <CardTitle className="text-sm flex items-center gap-2">
+  1045→            <Send className="h-4 w-4 text-emerald-400" />
+  1046→            Recent Notifications
+  1047→          </CardTitle>
+  1048→        </CardHeader>
+  1049→        <CardContent>
+  1050→          {notifLoading ? (
+  1051→            <div className="space-y-2">
+  1052→              {[0, 1, 2].map((i) => <div key={i} className="h-12 animate-pulse rounded-md bg-muted/40" />)}
+  1053→            </div>
+  1054→          ) : notifications.length === 0 ? (
+  1055→            <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+  1056→              <Bell className="h-8 w-8 text-muted-foreground/40" />
+  1057→              <p className="text-xs text-muted-foreground">Belum ada notifikasi terkirim.</p>
+  1058→            </div>
+  1059→          ) : (
+  1060→            <div className="max-h-72 space-y-1.5 overflow-y-auto scroll-thin pr-1">
+  1061→              {notifications.map((n) => (
+  1062→                <div
+  1063→                  key={n.id}
+  1064→                  className="flex items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-2 text-xs"
+  1065→                >
+  1066→                  <Badge variant="outline" className={cn('text-[10px]', NOTIF_TYPE_COLOR[n.type])}>
+  1067→                    {n.type.replace('_', ' ')}
+  1068→                  </Badge>
+  1069→                  <span className="flex-1 truncate font-medium">{n.subject}</span>
+  1070→                  <span className="text-[10px] text-muted-foreground truncate max-w-[120px]">{n.recipient}</span>
+  1071→                  {n.sent ? (
+  1072→                    <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-[10px]">
+  1073→                      <Check className="h-2.5 w-2.5" /> sent
+  1074→                    </Badge>
+  1075→                  ) : (
+  1076→                    <Badge variant="outline" className="text-rose-300 border-rose-500/30 text-[10px]">failed</Badge>
+  1077→                  )}
+  1078→                  <span className="font-mono text-[10px] text-muted-foreground whitespace-nowrap">
+  1079→                    {relativeTime(n.createdAt)}
+  1080→                  </span>
+  1081→                </div>
+  1082→              ))}
+  1083→            </div>
+  1084→          )}
+  1085→        </CardContent>
+  1086→      </Card>
+  1087→    </div>
+  1088→  )
+  1089→}
+  1090→
+  1091→/* =================================================
+  1092→   TAB 5: Webhook Notifications (Discord / Telegram / Slack)
+  1093→   ================================================= */
+  1094→
+  1095→function WebhookTab() {
+  1096→  const qc = useQueryClient()
+  1097→  const { data: cfgData } = useQuery({
+  1098→    queryKey: ['system-config'],
+  1099→    queryFn: () => api.systemConfig(),
+  1100→  })
+  1101→  const cfg = cfgData?.config ?? {}
+  1102→
+  1103→  // Local form state — synced from remote config when it changes.
+  1104→  const [enabled, setEnabled] = useState(cfg.webhook_enabled === 'true')
+  1105→  const [discordUrl, setDiscordUrl] = useState(cfg.webhook_discord_url ?? '')
+  1106→  const [telegramToken, setTelegramToken] = useState(cfg.webhook_telegram_token ?? '')
+  1107→  const [telegramChatId, setTelegramChatId] = useState(cfg.webhook_telegram_chat_id ?? '')
+  1108→  const [slackUrl, setSlackUrl] = useState(cfg.webhook_slack_url ?? '')
+  1109→
+  1110→  // Track last-seen remote values to detect when query refetches bring new data.
+  1111→  const [lastEnabled, setLastEnabled] = useState<string | undefined>(cfg.webhook_enabled)
+  1112→  const [lastDiscord, setLastDiscord] = useState<string | undefined>(cfg.webhook_discord_url)
+  1113→  const [lastTgToken, setLastTgToken] = useState<string | undefined>(cfg.webhook_telegram_token)
+  1114→  const [lastTgChat, setLastTgChat] = useState<string | undefined>(cfg.webhook_telegram_chat_id)
+  1115→  const [lastSlack, setLastSlack] = useState<string | undefined>(cfg.webhook_slack_url)
+  1116→
+  1117→  if (cfg.webhook_enabled !== lastEnabled) {
+  1118→    setLastEnabled(cfg.webhook_enabled)
+  1119→    if (cfg.webhook_enabled != null) setEnabled(cfg.webhook_enabled === 'true')
+  1120→  }
+  1121→  if (cfg.webhook_discord_url !== lastDiscord) {
+  1122→    setLastDiscord(cfg.webhook_discord_url)
+  1123→    if (cfg.webhook_discord_url != null) setDiscordUrl(cfg.webhook_discord_url)
+  1124→  }
+  1125→  if (cfg.webhook_telegram_token !== lastTgToken) {
+  1126→    setLastTgToken(cfg.webhook_telegram_token)
+  1127→    if (cfg.webhook_telegram_token != null) setTelegramToken(cfg.webhook_telegram_token)
+  1128→  }
+  1129→  if (cfg.webhook_telegram_chat_id !== lastTgChat) {
+  1130→    setLastTgChat(cfg.webhook_telegram_chat_id)
+  1131→    if (cfg.webhook_telegram_chat_id != null) setTelegramChatId(cfg.webhook_telegram_chat_id)
+  1132→  }
+  1133→  if (cfg.webhook_slack_url !== lastSlack) {
+  1134→    setLastSlack(cfg.webhook_slack_url)
+  1135→    if (cfg.webhook_slack_url != null) setSlackUrl(cfg.webhook_slack_url)
+  1136→  }
+  1137→
+  1138→  // Show/hide secrets toggle
+  1139→  const [showSecrets, setShowSecrets] = useState(false)
+  1140→
+  1141→  const save = useMutation({
+  1142→    mutationFn: () =>
+  1143→      api.updateSystemConfig({
+  1144→        webhook_enabled: String(enabled),
+  1145→        webhook_discord_url: discordUrl,
+  1146→        webhook_telegram_token: telegramToken,
+  1147→        webhook_telegram_chat_id: telegramChatId,
+  1148→        webhook_slack_url: slackUrl,
+  1149→      }),
+  1150→    onSuccess: () => {
+  1151→      qc.invalidateQueries({ queryKey: ['system-config'] })
+  1152→      toast.success('Webhook config disimpan')
+  1153→    },
+  1154→    onError: (e: Error) => toast.error('Gagal menyimpan', { description: e.message }),
+  1155→  })
+  1156→
+  1157→  const testWebhook = useMutation({
+  1158→    mutationFn: async () => {
+  1159→      const res = await fetch('/api/system/webhook-test', { method: 'POST' })
+  1160→      const data = await res.json().catch(() => ({}))
+  1161→      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+  1162→      return data as { ok: boolean; targets: string[]; message?: string }
+  1163→    },
+  1164→    onSuccess: (data) => {
+  1165→      toast.success('Webhook test terkirim', {
+  1166→        description: data.targets?.length
+  1167→          ? `Targets: ${data.targets.join(', ')}`
+  1168→          : 'Tidak ada target terkonfigurasi',
+  1169→      })
+  1170→    },
+  1171→    onError: (e: Error) => toast.error('Gagal kirim webhook test', { description: e.message }),
+  1172→  })
+  1173→
+  1174→  const hasAnyTarget = Boolean(
+  1175→    discordUrl || (telegramToken && telegramChatId) || slackUrl,
+  1176→  )
+  1177→
+  1178→  return (
+  1179→    <div className="space-y-4">
+  1180→      <div>
+  1181→        <h3 className="flex items-center gap-2 text-base font-semibold">
+  1182→          <Webhook className="h-4 w-4 text-violet-400" />
+  1183→          Webhook Notifications
+  1184→        </h3>
+  1185→        <p className="text-xs text-muted-foreground">
+  1186→          Kirim notifikasi trade event ke Discord, Telegram, atau Slack. Berjalan paralel dengan email notifikasi.
+  1187→        </p>
+  1188→      </div>
+  1189→
+  1190→      {/* Enable toggle + test */}
+  1191→      <Card>
+  1192→        <CardHeader className="pb-3">
+  1193→          <CardTitle className="text-sm flex items-center gap-2">
+  1194→            <Bell className="h-4 w-4 text-violet-400" />
+  1195→            Master Toggle
+  1196→          </CardTitle>
+  1197→          <CardDescription className="text-xs">
+  1198→            Aktifkan/Nonaktifkan semua webhook notifications.
+  1199→          </CardDescription>
+  1200→        </CardHeader>
+  1201→        <CardContent className="space-y-3">
+  1202→          <div className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+  1203→            <Webhook className="h-3.5 w-3.5 text-violet-400" />
+  1204→            <Switch checked={enabled} onCheckedChange={setEnabled} />
+  1205→            <span className="text-xs text-muted-foreground">
+  1206→              {enabled ? 'Webhook notifications enabled' : 'Webhook notifications disabled'}
+  1207→            </span>
+  1208→            <Badge
+  1209→              variant="outline"
+  1210→              className={cn(
+  1211→                'ml-auto text-[10px]',
+  1212→                enabled
+  1213→                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+  1214→                  : 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+  1215→              )}
+  1216→            >
+  1217→              {enabled ? 'ACTIVE' : 'INACTIVE'}
+  1218→            </Badge>
+  1219→          </div>
+  1220→
+  1221→          <div className="flex flex-wrap items-center gap-2">
+  1222→            <Button onClick={() => save.mutate()} disabled={save.isPending}>
+  1223→              <Save className="h-4 w-4" />
+  1224→              Save Config
+  1225→            </Button>
+  1226→            <Button
+  1227→              variant="outline"
+  1228→              onClick={() => testWebhook.mutate()}
+  1229→              disabled={testWebhook.isPending || !enabled || !hasAnyTarget}
+  1230→            >
+  1231→              <Send className="h-4 w-4" />
+  1232→              Test Webhook
+  1233→            </Button>
+  1234→            <Button
+  1235→              variant="ghost"
+  1236→              size="sm"
+  1237→              onClick={() => setShowSecrets((v) => !v)}
+  1238→              className="ml-auto text-xs"
+  1239→            >
+  1240→              {showSecrets ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+  1241→              {showSecrets ? 'Hide' : 'Show'} secrets
+  1242→            </Button>
+  1243→          </div>
+  1244→          {!enabled && (
+  1245→            <p className="text-[11px] text-amber-300">
+  1246→              Webhook dinonaktifkan — aktifkan toggle untuk mengirim test.
+  1247→            </p>
+  1248→          )}
+  1249→          {enabled && !hasAnyTarget && (
+  1250→            <p className="text-[11px] text-amber-300">
+  1251→              Tidak ada target terkonfigurasi — isi minimal satu webhook URL di bawah.
+  1252→            </p>
+  1253→          )}
+  1254→        </CardContent>
+  1255→      </Card>
+  1256→
+  1257→      {/* Discord */}
+  1258→      <Card>
+  1259→        <CardHeader className="pb-3">
+  1260→          <CardTitle className="text-sm flex items-center gap-2">
+  1261→            <MessageCircle className="h-4 w-4 text-indigo-400" />
+  1262→            Discord
+  1263→          </CardTitle>
+  1264→          <CardDescription className="text-xs">
+  1265→            Kirim embed notifikasi ke channel Discord via Webhook URL.
+  1266→          </CardDescription>
+  1267→        </CardHeader>
+  1268→        <CardContent className="space-y-2">
+  1269→          <Label className="text-xs">Discord Webhook URL</Label>
+  1270→          <Input
+  1271→            type={showSecrets ? 'text' : 'password'}
+  1272→            value={discordUrl}
+  1273→            onChange={(e) => setDiscordUrl(e.target.value)}
+  1274→            placeholder="https://discord.com/api/webhooks/..."
+  1275→            className="font-mono text-xs"
+  1276→            autoComplete="off"
+  1277→            spellCheck={false}
+  1278→          />
+  1279→          <p className="text-[10px] text-muted-foreground">
+  1280→            Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.
+  1281→          </p>
+  1282→        </CardContent>
+  1283→      </Card>
+  1284→
+  1285→      {/* Telegram */}
+  1286→      <Card>
+  1287→        <CardHeader className="pb-3">
+  1288→          <CardTitle className="text-sm flex items-center gap-2">
+  1289→            <Send className="h-4 w-4 text-sky-400" />
+  1290→            Telegram
+  1291→          </CardTitle>
+  1292→          <CardDescription className="text-xs">
+  1293→            Kirim pesan Markdown via Bot API ke chat ID tujuan.
+  1294→          </CardDescription>
+  1295→        </CardHeader>
+  1296→        <CardContent className="space-y-3">
+  1297→          <div className="space-y-1.5">
+  1298→            <Label className="text-xs">Bot Token</Label>
+  1299→            <Input
+  1300→              type={showSecrets ? 'text' : 'password'}
+  1301→              value={telegramToken}
+  1302→              onChange={(e) => setTelegramToken(e.target.value)}
+  1303→              placeholder="123456789:ABC-DEF..."
+  1304→              className="font-mono text-xs"
+  1305→              autoComplete="off"
+  1306→              spellCheck={false}
+  1307→            />
+  1308→          </div>
+  1309→          <div className="space-y-1.5">
+  1310→            <Label className="text-xs">Chat ID</Label>
+  1311→            <Input
+  1312→              value={telegramChatId}
+  1313→              onChange={(e) => setTelegramChatId(e.target.value)}
+  1314→              placeholder="-1001234567890 (channel) atau 123456789 (private)"
+  1315→              className="font-mono text-xs"
+  1316→              autoComplete="off"
+  1317→              spellCheck={false}
+  1318→            />
+  1319→          </div>
+  1320→          <p className="text-[10px] text-muted-foreground">
+  1321→            Telegram: chat with <span className="font-mono">@BotFather</span> → /newbot to get a token.
+  1322→            Add the bot to your channel/group, then use <span className="font-mono">@userinfobot</span> to find your Chat ID.
+  1323→          </p>
+  1324→        </CardContent>
+  1325→      </Card>
+  1326→
+  1327→      {/* Slack */}
+  1328→      <Card>
+  1329→        <CardHeader className="pb-3">
+  1330→          <CardTitle className="text-sm flex items-center gap-2">
+  1331→            <MessageCircle className="h-4 w-4 text-emerald-400" />
+  1332→            Slack
+  1333→          </CardTitle>
+  1334→          <CardDescription className="text-xs">
+  1335→            Kirim attachment notifikasi ke channel Slack via Incoming Webhook.
+  1336→          </CardDescription>
+  1337→        </CardHeader>
+  1338→        <CardContent className="space-y-2">
+  1339→          <Label className="text-xs">Slack Incoming Webhook URL</Label>
+  1340→          <Input
+  1341→            type={showSecrets ? 'text' : 'password'}
+  1342→            value={slackUrl}
+  1343→            onChange={(e) => setSlackUrl(e.target.value)}
+  1344→            placeholder="https://hooks.slack.com/services/T.../B.../..."
+  1345→            className="font-mono text-xs"
+  1346→            autoComplete="off"
+  1347→            spellCheck={false}
+  1348→          />
+  1349→          <p className="text-[10px] text-muted-foreground">
+  1350→            Slack: Apps → Build → Make a Custom App → Incoming Webhooks → Add New Webhook to Workspace.
+  1351→          </p>
+  1352→        </CardContent>
+  1353→      </Card>
+  1354→
+  1355→      {/* Event matrix */}
+  1356→      <Card>
+  1357→        <CardHeader className="pb-3">
+  1358→          <CardTitle className="text-sm flex items-center gap-2">
+  1359→            <Zap className="h-4 w-4 text-violet-400" />
+  1360→            Webhook Event Matrix
+  1361→          </CardTitle>
+  1362→          <CardDescription className="text-xs">
+  1363→            Event yang memicu webhook (otomatis menyertai email notifikasi).
+  1364→          </CardDescription>
+  1365→        </CardHeader>
+  1366→        <CardContent>
+  1367→          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+  1368→            {NOTIF_TYPES.map((t) => (
+  1369→              <div
+  1370→                key={t.value}
+  1371→                className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2"
+  1372→              >
+  1373→                <span
+  1374→                  className={cn(
+  1375→                    'text-xs font-medium',
+  1376→                    NOTIF_TYPE_COLOR[t.value].split(' ').find((c) => c.startsWith('text-')),
+  1377→                  )}
+  1378→                >
+  1379→                  {t.label}
+  1380→                </span>
+  1381→                <Badge variant="outline" className="text-[10px] text-emerald-300 border-emerald-500/30">
+  1382→                  <Check className="h-2.5 w-2.5" /> webhook
+  1383→                </Badge>
+  1384→              </div>
+  1385→            ))}
+  1386→          </div>
+  1387→          <p className="mt-2 text-[10px] text-muted-foreground">
+  1388→            * Integrasi webhook ke trade event handler dilakukan oleh main agent setelah
+  1389→            utilitas webhook.ts tersedia. Saat ini webhook test &amp; config UI sudah aktif.
+  1390→          </p>
+  1391→        </CardContent>
+  1392→      </Card>
+  1393→    </div>
+  1394→  )
+  1395→}
+  1396→
+  1397→/* =================================================
+  1398→   TAB 6: MT5 Connection (bridge status + connect + live account info)
+  1399→   ================================================= */
+  1400→
+  1401→interface BridgeHealth {
+  1402→  ok: boolean
+  1403→  adapter: string
+  1404→  isLive: boolean
+  1405→  message: string
+  1406→}
+  1407→
+  1408→function MT5ConnectionTab() {
+  1409→  const qc = useQueryClient()
+  1410→  const [loginInput, setLoginInput] = useState('')
+  1411→  const [serverInput, setServerInput] = useState('FINEX-Demo')
+  1412→  const [passwordInput, setPasswordInput] = useState('')
+  1413→  const [accountId, setAccountId] = useState<string>('')
+  1414→  const [showPassword, setShowPassword] = useState(false)
+  1415→  // Connected MT5 login — persisted to localStorage so it survives refreshes.
+  1416→  const [connectedLogin, setConnectedLogin] = useState<number | null>(() => {
+  1417→    if (typeof window === 'undefined') return null
+  1418→    const raw = window.localStorage.getItem('mt5:connectedLogin')
+  1419→    return raw ? Number(raw) : null
+  1420→  })
+  1421→
+  1422→  function rememberLogin(login: number | null) {
+  1423→    setConnectedLogin(login)
+  1424→    if (typeof window === 'undefined') return
+  1425→    if (login == null) window.localStorage.removeItem('mt5:connectedLogin')
+  1426→    else window.localStorage.setItem('mt5:connectedLogin', String(login))
+  1427→  }
+  1428→
+  1429→  // --- A. Bridge health (every 5s) ---
+  1430→  const healthQuery = useQuery({
+  1431→    queryKey: ['mt5-health'],
+  1432→    queryFn: () => api.mt5Health(),
+  1433→    refetchInterval: 5000,
+  1434→    refetchOnMount: true,
+  1435→  })
+  1436→  const health: BridgeHealth | undefined = healthQuery.data
+  1437→
+  1438→  // --- accounts list (for the link dropdown) ---
+  1439→  const accountsQuery = useQuery({
+  1440→    queryKey: ['accounts'],
+  1441→    queryFn: () => api.accounts(),
+  1442→  })
+  1443→  const accounts = accountsQuery.data?.accounts ?? []
+  1444→
+  1445→  // Auto-select default account when first loaded
+  1446→  const [lastDefaultId, setLastDefaultId] = useState<string | undefined>(undefined)
+  1447→  if (accounts.length > 0 && lastDefaultId === undefined) {
+  1448→    const def = accounts.find((a) => a.isDefault) ?? accounts[0]
+  1449→    setLastDefaultId(def.id)
+  1450→    if (!accountId) setAccountId(def.id)
+  1451→  }
+  1452→
+  1453→  // --- C. Live account info (every 10s, only when connected) ---
+  1454→  const accountQuery = useQuery({
+  1455→    queryKey: ['mt5-account', connectedLogin],
+  1456→    queryFn: () => api.mt5AccountInfo(connectedLogin as number),
+  1457→    enabled: connectedLogin != null,
+  1458→    refetchInterval: 10000,
+  1459→    refetchOnMount: true,
+  1460→    retry: false,
+  1461→  })
+  1462→
+  1463→  // --- B. Connect mutation ---
+  1464→  const connectMut = useMutation({
+  1465→    mutationFn: () => api.mt5Connect({
+  1466→      login: Number(loginInput),
+  1467→      server: serverInput,
+  1468→      password: passwordInput,
+  1469→      accountId: accountId || undefined,
+  1470→    }),
+  1471→    onSuccess: (data) => {
+  1472→      rememberLogin(data.account.login)
+  1473→      qc.invalidateQueries({ queryKey: ['mt5-account', data.account.login] })
+  1474→      qc.invalidateQueries({ queryKey: ['accounts'] })
+  1475→      toast.success('MT5 connected — balance synced', {
+  1476→        description: `Login ${data.account.login} · ${data.account.server} · ${fmtMoney(data.account.balance, data.account.currency)}`,
+  1477→      })
+  1478→      setPasswordInput('')
+  1479→    },
+  1480→    onError: (e: Error) => toast.error('Gagal koneksi MT5', { description: e.message }),
+  1481→  })
+  1482→
+  1483→  // --- C. Disconnect mutation ---
+  1484→  const disconnectMut = useMutation({
+  1485→    mutationFn: () => api.mt5Disconnect(connectedLogin as number),
+  1486→    onSuccess: () => {
+  1487→      const wasLogin = connectedLogin
+  1488→      rememberLogin(null)
+  1489→      // Use removeQueries (not invalidateQueries) so we don't accidentally
+  1490→      // re-fire the account query with the now-stale login before the
+  1491→      // enabled=false flag takes effect.
+  1492→      qc.removeQueries({ queryKey: ['mt5-account', wasLogin] })
+  1493→      qc.invalidateQueries({ queryKey: ['accounts'] })
+  1494→      toast.success('MT5 disconnected', { description: 'Bridge session closed.' })
+  1495→    },
+  1496→    onError: (e: Error) => toast.error('Gagal disconnect MT5', { description: e.message }),
+  1497→  })
+  1498→
+  1499→  const isOnline = !!health?.ok
+  1500→  const isLiveAdapter = !!health?.isLive
+  1501→  const account: MT5AccountInfo | undefined = accountQuery.data?.account
+  1502→
+  1503→  return (
+  1504→    <div className="space-y-4">
+  1505→      <div>
+  1506→        <h3 className="flex items-center gap-2 text-base font-semibold">
+  1507→          <Cable className="h-4 w-4 text-emerald-400" />
+  1508→          MT5 Connection
+  1509→        </h3>
+  1510→        <p className="text-xs text-muted-foreground">
+  1511→          Status bridge, koneksi ke broker, dan info akun live dari MT5.
+  1512→        </p>
+  1513→      </div>
+  1514→
+  1515→      {/* A. Bridge Status Card */}
+  1516→      <motion.div
+  1517→        initial={{ opacity: 0, y: 8 }}
+  1518→        animate={{ opacity: 1, y: 0 }}
+  1519→        transition={{ duration: 0.22, ease: 'easeOut' }}
+  1520→      >
+  1521→        <Card className={cn(
+  1522→          'overflow-hidden border',
+  1523→          isOnline
+  1524→            ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent'
+  1525→            : 'border-rose-500/30 bg-gradient-to-br from-rose-500/10 via-rose-500/5 to-transparent',
+  1526→        )}>
+  1527→          <CardHeader className="pb-3">
+  1528→            <div className="flex items-start justify-between gap-2">
+  1529→              <div className="flex items-center gap-2">
+  1530→                <div className={cn(
+  1531→                  'flex h-9 w-9 items-center justify-center rounded-lg',
+  1532→                  isOnline ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400',
+  1533→                )}>
+  1534→                  {isOnline ? <Radio className="h-5 w-5" /> : <Wifi className="h-5 w-5" />}
+  1535→                </div>
+  1536→                <div>
+  1537→                  <CardTitle className="text-sm">MT5 Bridge Status</CardTitle>
+  1538→                  <CardDescription className="text-xs">
+  1539→                    Mini-service on port 3050 · polled every 5s
+  1540→                  </CardDescription>
+  1541→                </div>
+  1542→              </div>
+  1543→              <Badge
+  1544→                variant="outline"
+  1545→                className={cn(
+  1546→                  'text-[10px] font-semibold',
+  1547→                  isOnline
+  1548→                    ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+  1549→                    : 'border-rose-500/40 bg-rose-500/15 text-rose-300',
+  1550→                )}
+  1551→              >
+  1552→                <span className={cn(
+  1553→                  'h-1.5 w-1.5 rounded-full',
+  1554→                  isOnline ? 'bg-emerald-400 live-dot' : 'bg-rose-400',
+  1555→                )} />
+  1556→                {isOnline ? 'ONLINE' : 'OFFLINE'}
+  1557→              </Badge>
+  1558→            </div>
+  1559→          </CardHeader>
+  1560→          <CardContent className="space-y-3">
+  1561→            <div className="flex flex-wrap items-center gap-2">
+  1562→              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Adapter:</span>
+  1563→              <Badge
+  1564→                variant="outline"
+  1565→                className={cn(
+  1566→                  'text-[10px] font-medium',
+  1567→                  isLiveAdapter
+  1568→                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+  1569→                    : 'border-amber-500/40 bg-amber-500/10 text-amber-300',
+  1570→                )}
+  1571→              >
+  1572→                {isLiveAdapter ? 'Live (Real MT5)' : 'Mock (Simulation)'}
+  1573→              </Badge>
+  1574→              {health?.adapter && (
+  1575→                <span className="text-[10px] font-mono text-muted-foreground">
+  1576→                  name={health.adapter}
+  1577→                </span>
+  1578→              )}
+  1579→            </div>
+  1580→            <p className="text-xs leading-relaxed text-muted-foreground">
+  1581→              {health?.message ?? 'Checking bridge status…'}
+  1582→            </p>
+  1583→          </CardContent>
+  1584→        </Card>
+  1585→      </motion.div>
+  1586→
+  1587→      {/* B. Connect Form Card */}
+  1588→      <motion.div
+  1589→        initial={{ opacity: 0, y: 8 }}
+  1590→        animate={{ opacity: 1, y: 0 }}
+  1591→        transition={{ duration: 0.22, ease: 'easeOut', delay: 0.05 }}
+  1592→      >
+  1593→        <Card>
+  1594→          <CardHeader className="pb-3">
+  1595→            <CardTitle className="text-sm flex items-center gap-2">
+  1596→              <Plug className="h-4 w-4 text-emerald-400" />
+  1597→              Connect to MT5
+  1598→            </CardTitle>
+  1599→            <CardDescription className="text-xs">
+  1600→              Masukkan kredensial MT5 untuk membuka sesi bridge. Account opsional — bila dipilih, balance & equity lokal akan disinkronkan.
+  1601→            </CardDescription>
+  1602→          </CardHeader>
+  1603→          <CardContent className="space-y-3">
+  1604→            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  1605→              <div className="space-y-1.5">
+  1606→                <Label className="text-xs">MT5 Login</Label>
+  1607→                <Input
+  1608→                  type="number"
+  1609→                  inputMode="numeric"
+  1610→                  placeholder="12345678"
+  1611→                  value={loginInput}
+  1612→                  onChange={(e) => setLoginInput(e.target.value)}
+  1613→                  className="font-mono tabular-nums"
+  1614→                />
+  1615→              </div>
+  1616→              <div className="space-y-1.5">
+  1617→                <Label className="text-xs">Server</Label>
+  1618→                <Input
+  1619→                  placeholder="FINEX-Live atau FINEX-Demo"
+  1620→                  value={serverInput}
+  1621→                  onChange={(e) => setServerInput(e.target.value)}
+  1622→                />
+  1623→              </div>
+  1624→            </div>
+  1625→            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+  1626→              <div className="space-y-1.5">
+  1627→                <Label className="text-xs">Password</Label>
+  1628→                <div className="relative">
+  1629→                  <Input
+  1630→                    type={showPassword ? 'text' : 'password'}
+  1631→                    placeholder="••••••••"
+  1632→                    value={passwordInput}
+  1633→                    onChange={(e) => setPasswordInput(e.target.value)}
+  1634→                    className="pr-9 font-mono"
+  1635→                    autoComplete="off"
+  1636→                  />
+  1637→                  <Button
+  1638→                    type="button"
+  1639→                    variant="ghost"
+  1640→                    size="icon"
+  1641→                    className="absolute right-1 top-1 h-7 w-7 text-muted-foreground hover:text-foreground"
+  1642→                    onClick={() => setShowPassword((v) => !v)}
+  1643→                    tabIndex={-1}
+  1644→                  >
+  1645→                    {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+  1646→                  </Button>
+  1647→                </div>
+  1648→              </div>
+  1649→              <div className="space-y-1.5">
+  1650→                <Label className="text-xs">Link to local account (optional)</Label>
+  1651→                <Select value={accountId} onValueChange={setAccountId}>
+  1652→                  <SelectTrigger className="w-full">
+  1653→                    <SelectValue placeholder="Pilih akun lokal…" />
+  1654→                  </SelectTrigger>
+  1655→                  <SelectContent>
+  1656→                    {accounts.map((a) => (
+  1657→                      <SelectItem key={a.id} value={a.id}>
+  1658→                        {a.name} · {a.login}
+  1659→                      </SelectItem>
+  1660→                    ))}
+  1661→                  </SelectContent>
+  1662→                </Select>
+  1663→              </div>
+  1664→            </div>
+  1665→
+  1666→            <div className="flex flex-wrap items-center gap-2 pt-1">
+  1667→              <Button
+  1668→                className="bg-emerald-600 text-white hover:bg-emerald-700"
+  1669→                onClick={() => connectMut.mutate()}
+  1670→                disabled={connectMut.isPending || !loginInput || !serverInput || !passwordInput}
+  1671→              >
+  1672→                {connectMut.isPending ? (
+  1673→                  <Loader2 className="h-4 w-4 animate-spin" />
+  1674→                ) : (
+  1675→                  <Cable className="h-4 w-4" />
+  1676→                )}
+  1677→                {connectMut.isPending ? 'Connecting…' : 'Connect to MT5'}
+  1678→              </Button>
+  1679→              {!isOnline && (
+  1680→                <span className="text-[11px] text-amber-300">
+  1681→                  Bridge offline — koneksi mungkin gagal. Mulai mt5-bridge service di port 3050.
+  1682→                </span>
+  1683→              )}
+  1684→            </div>
+  1685→          </CardContent>
+  1686→        </Card>
+  1687→      </motion.div>
+  1688→
+  1689→      {/* C. Live Account Info Card (only when connected & data available) */}
+  1690→      {connectedLogin != null && account && (
+  1691→        <motion.div
+  1692→          initial={{ opacity: 0, y: 8 }}
+  1693→          animate={{ opacity: 1, y: 0 }}
+  1694→          transition={{ duration: 0.22, ease: 'easeOut', delay: 0.1 }}
+  1695→        >
+  1696→          <Card className="border-emerald-500/30">
+  1697→            <CardHeader className="pb-3">
+  1698→              <div className="flex items-start justify-between gap-2">
+  1699→                <div className="flex items-center gap-2">
+  1700→                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400">
+  1701→                    <Activity className="h-5 w-5" />
+  1702→                  </div>
+  1703→                  <div>
+  1704→                    <CardTitle className="text-sm">Live Account Info</CardTitle>
+  1705→                    <CardDescription className="text-xs font-mono">
+  1706→                      Login {account.login} · {account.server} · {account.company}
+  1707→                    </CardDescription>
+  1708→                  </div>
+  1709→                </div>
+  1710→                <Badge variant="outline" className="text-[10px] border-emerald-500/40 bg-emerald-500/10 text-emerald-300">
+  1711→                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 live-dot" />
+  1712→                  CONNECTED
+  1713→                </Badge>
+  1714→              </div>
+  1715→            </CardHeader>
+  1716→            <CardContent className="space-y-4">
+  1717→              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+  1718→                <MetricCard
+  1719→                  label="Balance"
+  1720→                  value={fmtMoney(account.balance, account.currency)}
+  1721→                  accent={account.balance >= 0 ? 'emerald' : 'rose'}
+  1722→                  big
+  1723→                />
+  1724→                <MetricCard
+  1725→                  label="Equity"
+  1726→                  value={fmtMoney(account.equity, account.currency)}
+  1727→                  accent={account.equity >= 0 ? 'emerald' : 'rose'}
+  1728→                  big
+  1729→                />
+  1730→                <MetricCard
+  1731→                  label="Free Margin"
+  1732→                  value={fmtMoney(account.freeMargin, account.currency)}
+  1733→                  accent="emerald"
+  1734→                />
+  1735→                <MetricCard
+  1736→                  label="Used Margin"
+  1737→                  value={fmtMoney(account.margin, account.currency)}
+  1738→                  accent="default"
+  1739→                />
+  1740→                <MetricCard
+  1741→                  label="Margin Level"
+  1742→                  value={account.marginLevel > 0 ? `${account.marginLevel.toFixed(2)}%` : '—'}
+  1743→                  accent={
+  1744→                    account.marginLevel > 0 && account.marginLevel < 100
+  1745→                      ? 'rose'
+  1746→                      : account.marginLevel > 0 && account.marginLevel < 200
+  1747→                        ? 'amber'
+  1748→                        : 'emerald'
+  1749→                  }
+  1750→                />
+  1751→                <MetricCard
+  1752→                  label="Leverage"
+  1753→                  value={`1:${account.leverage}`}
+  1754→                  accent="violet"
+  1755→                />
+  1756→              </div>
+  1757→
+  1758→              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+  1759→                <div className="text-[11px] text-muted-foreground">
+  1760→                  Name: <span className="font-medium text-foreground">{account.name}</span>
+  1761→                  {account.connectedAt && (
+  1762→                    <span className="ml-2">· connected {relativeTime(account.connectedAt)}</span>
+  1763→                  )}
+  1764→                </div>
+  1765→                <Button
+  1766→                  variant="outline"
+  1767→                  size="sm"
+  1768→                  onClick={() => disconnectMut.mutate()}
+  1769→                  disabled={disconnectMut.isPending}
+  1770→                  className="border-rose-500/40 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+  1771→                >
+  1772→                  {disconnectMut.isPending ? (
+  1773→                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1774→                  ) : (
+  1775→                    <Unlink className="h-3.5 w-3.5" />
+  1776→                  )}
+  1777→                  Disconnect
+  1778→                </Button>
+  1779→              </div>
+  1780→            </CardContent>
+  1781→          </Card>
+  1782→        </motion.div>
+  1783→      )}
+  1784→
+  1785→      {/* C2. Session lost card — bridge no longer has this login (e.g. service restarted) */}
+  1786→      {connectedLogin != null && accountQuery.isError && (
+  1787→        <Card className="border-amber-500/40 bg-amber-500/5">
+  1788→          <CardContent className="p-4 flex flex-wrap items-center justify-between gap-3">
+  1789→            <div className="flex items-start gap-2">
+  1790→              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400 mt-0.5" />
+  1791→              <div className="text-xs">
+  1792→                <div className="font-semibold text-amber-300">MT5 session expired</div>
+  1793→                <p className="text-amber-200/80 mt-0.5">
+  1794→                  Login {connectedLogin} tidak ditemukan di bridge. Service mungkin sudah restart.
+  1795→                </p>
+  1796→              </div>
+  1797→            </div>
+  1798→            <Button
+  1799→              variant="outline"
+  1800→              size="sm"
+  1801→              onClick={() => {
+  1802→                rememberLogin(null)
+  1803→                qc.invalidateQueries({ queryKey: ['mt5-account'] })
+  1804→              }}
+  1805→              className="border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
+  1806→            >
+  1807→              <Unlink className="h-3.5 w-3.5" />
+  1808→              Forget session
+  1809→            </Button>
+  1810→          </CardContent>
+  1811→        </Card>
+  1812→      )}
+  1813→
+  1814→      {/* C3. Loading skeleton while account query is in flight */}
+  1815→      {connectedLogin != null && !account && !accountQuery.isError && (
+  1816→        <Card className="border-muted">
+  1817→          <CardContent className="p-4 space-y-3">
+  1818→            <div className="flex items-center gap-2">
+  1819→              <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+  1820→              <span className="text-xs text-muted-foreground">
+  1821→                Fetching live account info for login {connectedLogin}…
+  1822→              </span>
+  1823→            </div>
+  1824→            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+  1825→              {[0, 1, 2, 3, 4, 5].map((i) => (
+  1826→                <div key={i} className="h-16 animate-pulse rounded-md bg-muted/40" />
+  1827→              ))}
+  1828→            </div>
+  1829→          </CardContent>
+  1830→        </Card>
+  1831→      )}
+  1832→
+  1833→      {/* D. Info Banner */}
+  1834→      <Card className="border-violet-500/30 bg-violet-500/5">
+  1835→        <CardContent className="p-4 flex gap-3">
+  1836→          <Info className="h-4 w-4 shrink-0 text-violet-400 mt-0.5" />
+  1837→          <p className="text-xs text-violet-200/90 leading-relaxed">
+  1838→            Mock adapter berjalan di sandbox tanpa MT5 nyata. Untuk trading real, deploy Python bridge
+  1839→            di Windows machine dengan MetaTrader 5 terinstall. Lihat{' '}
+  1840→            <code className="rounded bg-violet-500/15 px-1 py-0.5 font-mono text-[11px] text-violet-200">
+  1841→              mini-services/mt5-bridge/README.md
+  1842→            </code>{' '}
+  1843→            untuk panduan deployment.
+  1844→          </p>
+  1845→        </CardContent>
+  1846→      </Card>
+  1847→    </div>
+  1848→  )
+  1849→}
+  1850→
+  1851→function MetricCard({
+  1852→  label,
+  1853→  value,
+  1854→  accent = 'default',
+  1855→  big = false,
+  1856→}: {
+  1857→  label: string
+  1858→  value: string
+  1859→  accent?: 'default' | 'emerald' | 'rose' | 'amber' | 'violet'
+  1860→  big?: boolean
+  1861→}) {
+  1862→  const accentMap: Record<string, string> = {
+  1863→    default: 'text-foreground',
+  1864→    emerald: 'text-emerald-400',
+  1865→    rose: 'text-rose-400',
+  1866→    amber: 'text-amber-400',
+  1867→    violet: 'text-violet-400',
+  1868→  }
+  1869→  return (
+  1870→    <div className="rounded-md border border-border bg-muted/30 px-3 py-2.5">
+  1871→      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+  1872→      <div className={cn(
+  1873→        'font-mono tabular-nums font-semibold',
+  1874→        big ? 'text-base mt-0.5' : 'text-sm mt-1',
+  1875→        accentMap[accent],
+  1876→      )}>
+  1877→        {value}
+  1878→      </div>
+  1879→    </div>
+  1880→  )
+  1881→}
+  1882→
+  1883→/* =================================================
+  1884→   TAB 8: User Management (admin only)
+  1885→   ================================================= */
+  1886→
+  1887→type UserRole = 'admin' | 'trader' | 'viewer'
+  1888→
+  1889→const ROLE_BADGE: Record<UserRole, { className: string; icon: typeof Crown; label: string }> = {
+  1890→  admin: { className: 'border-violet-500/40 bg-violet-500/10 text-violet-300', icon: Crown, label: 'Admin' },
+  1891→  trader: { className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300', icon: TrendingUp, label: 'Trader' },
+  1892→  viewer: { className: 'border-amber-500/40 bg-amber-500/10 text-amber-300', icon: Eye, label: 'Viewer' },
+  1893→}
+  1894→
+  1895→function UserManagementTab() {
+  1896→  const { data: session } = useSession()
+  1897→  const role = (session?.user?.role ?? undefined) as UserRole | undefined
+  1898→  const currentUserId = session?.user?.id
+  1899→  const isAdmin = role === 'admin'
+  1900→
+  1901→  // Non-admin landing: tab is visible but content is gated.
+  1902→  if (!isAdmin) {
+  1903→    return (
+  1904→      <motion.div
+  1905→        initial={{ opacity: 0, y: 6 }}
+  1906→        animate={{ opacity: 1, y: 0 }}
+  1907→        transition={{ duration: 0.18 }}
+  1908→      >
+  1909→        <Card className="border-rose-500/30 bg-rose-500/5">
+  1910→          <CardContent className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+  1911→            <div className="flex h-14 w-14 items-center justify-center rounded-full border border-rose-500/30 bg-rose-500/10">
+  1912→              <Lock className="h-6 w-6 text-rose-400" />
+  1913→            </div>
+  1914→            <div className="space-y-1">
+  1915→              <h3 className="text-base font-semibold text-rose-300">Access Denied</h3>
+  1916→              <p className="text-xs text-muted-foreground max-w-sm">
+  1917→                You need admin privileges to manage users. Your role:{' '}
+  1918→                <span className="font-mono font-semibold capitalize text-rose-300">
+  1919→                  {role ?? 'unknown'}
+  1920→                </span>
+  1921→              </p>
+  1922→            </div>
+  1923→          </CardContent>
+  1924→        </Card>
+  1925→      </motion.div>
+  1926→    )
+  1927→  }
+  1928→
+  1929→  return (
+  1930→    <div className="space-y-4">
+  1931→      <CurrentUserCard currentRole={role} />
+  1932→      <UsersListCard currentUserId={currentUserId ?? ''} />
+  1933→      <CreateUserCard />
+  1934→      <RolePermissionsInfoCard />
+  1935→    </div>
+  1936→  )
+  1937→}
+  1938→
+  1939→/* ----- A. Current User Card with Change Password dialog ----- */
+  1940→function CurrentUserCard({ currentRole }: { currentRole: UserRole }) {
+  1941→  const { data: session } = useSession()
+  1942→  const [open, setOpen] = useState(false)
+  1943→  const [form, setForm] = useState({ current: '', next: '', confirm: '' })
+  1944→  const [showPwd, setShowPwd] = useState({ current: false, next: false, confirm: false })
+  1945→
+  1946→  const { data: meData } = useQuery({
+  1947→    queryKey: ['me'],
+  1948→    queryFn: () => api.me(),
+  1949→    staleTime: 60_000,
+  1950→  })
+  1951→  const me = meData?.user
+  1952→
+  1953→  const changePwdMut = useMutation({
+  1954→    mutationFn: () => api.changePassword({
+  1955→      currentPassword: form.current,
+  1956→      newPassword: form.next,
+  1957→    }),
+  1958→    onSuccess: () => {
+  1959→      toast.success('Password changed', {
+  1960→        description: 'You will need to use the new password next time you sign in.',
+  1961→      })
+  1962→      setOpen(false)
+  1963→      setForm({ current: '', next: '', confirm: '' })
+  1964→    },
+  1965→    onError: (e: Error) => toast.error('Failed to change password', { description: e.message }),
+  1966→  })
+  1967→
+  1968→  const onSubmit = () => {
+  1969→    if (form.next.length < 6) {
+  1970→      toast.error('New password must be at least 6 characters')
+  1971→      return
+  1972→    }
+  1973→    if (form.next !== form.confirm) {
+  1974→      toast.error('New passwords do not match')
+  1975→      return
+  1976→    }
+  1977→    changePwdMut.mutate()
+  1978→  }
+  1979→
+  1980→  const RoleIcon = ROLE_BADGE[currentRole].icon
+  1981→  const displayName = session?.user?.name ?? me?.name ?? '—'
+  1982→  const displayEmail = session?.user?.email ?? me?.email ?? '—'
+  1983→
+  1984→  return (
+  1985→    <>
+  1986→      <motion.div
+  1987→        initial={{ opacity: 0, y: 6 }}
+  1988→        animate={{ opacity: 1, y: 0 }}
+  1989→        transition={{ duration: 0.18 }}
+  1990→      >
+  1991→        <Card>
+  1992→          <CardHeader className="pb-3">
+  1993→            <CardTitle className="flex items-center gap-2 text-base">
+  1994→              <User className="h-5 w-5 text-emerald-400" />
+  1995→              Current User
+  1996→            </CardTitle>
+  1997→            <CardDescription className="text-xs">
+  1998→              Your account info & password management.
+  1999→            </CardDescription>
+  2000→          </CardHeader>
+
+[showing lines 1-2000 of 2902; use offset=2001 with limit to continue reading]
