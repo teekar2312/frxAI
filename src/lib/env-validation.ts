@@ -5,7 +5,7 @@
 // In production, missing critical vars throw and prevent startup.
 
 const REQUIRED_VARS: Array<{ key: string; required: boolean; minLength?: number; description: string }> = [
-  { key: 'DATABASE_URL', required: true, description: 'SQLite database file path (file:./db/custom.db)' },
+  { key: 'DATABASE_URL', required: true, description: 'MySQL connection string (mysql://user:pass@host:3306/dbname)' },
   { key: 'NEXTAUTH_SECRET', required: false, minLength: 32, description: 'JWT signing secret (>= 32 chars, auto-generated in dev)' },
   { key: 'NEXTAUTH_URL', required: false, description: 'Canonical URL of the app (e.g., https://app.example.com)' },
 ]

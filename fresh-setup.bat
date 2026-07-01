@@ -7,9 +7,10 @@ echo.
 echo   Stopping any running dev server...
 taskkill /f /im node.exe 2>nul
 
-echo   Deleting node_modules, .next, lockfiles...
+echo   Deleting node_modules, .next, generated files, lockfiles...
 if exist node_modules rmdir /s /q node_modules
 if exist .next rmdir /s /q .next
+if exist src\generated rmdir /s /q src\generated
 if exist bun.lock del /q bun.lock
 if exist bun.lockb del /q bun.lockb
 if exist package-lock.json del /q package-lock.json
@@ -23,7 +24,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo   Pushing database schema...
+echo   Pushing database schema to MySQL...
 call bun run db:push
 if %errorlevel% neq 0 (
     call npx prisma db push

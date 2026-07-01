@@ -1,6 +1,6 @@
-// Database Backup — automated SQLite file backup with timestamped copies.
+// Database Backup — MySQL backup using mysqldump.
 //
-// SQLite databases are single files, making backup trivial: just copy the file.
+// MySQL databases are backed up via the `mysqldump` CLI tool.
 // This module provides:
 //   - Manual backup trigger (API endpoint)
 //   - Automated backup (SL/TP monitor every hour)
@@ -8,20 +8,37 @@
 //   - Backup cleanup (keep last N backups to prevent disk fill)
 //
 // Backups are stored in db/backups/ directory with format:
-//   custom-YYYYMMDD-HHMMSS.db
+//   frxai-YYYYMMDD-HHMMSS.sql.gz
 //
-// For production with PostgreSQL/MySQL, replace this with pg_dump or
-// mysqldump — the interface (backupDatabase, listBackups) stays the same.
+// The interface (backupDatabase, listBackups) stays the same as the
+// previous SQLite implementation for drop-in compatibility.
 
 import 'server-only'
 import { promises as fs } from 'fs'
 import { existsSync } from 'fs'
 import * as path from 'path'
+import { execSync } from 'child_process'
 import { logInfo } from './logger'
 
-const DB_PATH = process.env.DATABASE_URL?.replace('file:', '') || '/home/z/my-project/db/custom.db'
-const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups')
+const BACKUP_DIR = path.resolve('db', 'backups')
 const MAX_BACKUPS = 24 // keep last 24 backups (24 hours worth if hourly)
+
+// Parse DATABASE_URL to extract mysql connection params
+function parseDbUrl(): { user: string; password: string; host: string; port: string; database: string } {
+  const url = process.env.DATABASE_URL || ''
+  try {
+    const u = new URL(url)
+    return {
+      user: u.username || 'root',
+      password: u.password || '',
+      host: u.hostname || 'localhost',
+      port: u.port || '3306',
+      database: u.pathname.slice(1) || 'frxai',
+    }
+  } catch {
+    return { user: 'root', password: '', host: 'localhost', port: '3306', database: 'frxai' }
+  }
+}
 
 export interface BackupInfo {
   filename: string
@@ -31,8 +48,8 @@ export interface BackupInfo {
 }
 
 /**
- * Create a backup of the SQLite database file.
- * Copies db/custom.db → db/backups/custom-YYYYMMDD-HHMMSS.db
+ * Create a backup of the MySQL database using mysqldump.
+ * Outputs to db/backups/frxai-YYYYMMDD-HHMMSS.sql
  *
  * @returns BackupInfo with filename, size, timestamp
  */
@@ -40,21 +57,32 @@ export async function backupDatabase(): Promise<BackupInfo> {
   // Ensure backup directory exists
   await fs.mkdir(BACKUP_DIR, { recursive: true })
 
-  // Check source DB exists
-  if (!existsSync(DB_PATH)) {
-    throw new Error(`Database file not found: ${DB_PATH}`)
-  }
+  const { user, password, host, port, database } = parseDbUrl()
 
   // Generate timestamped filename
   const now = new Date()
   const ts = now.toISOString().replace(/[:.]/g, '-').slice(0, 19) // YYYY-MM-DDTHH-MM-SS
-  const filename = `custom-${ts}.db`
+  const filename = `frxai-${ts}.sql`
   const backupPath = path.join(BACKUP_DIR, filename)
 
-  // Copy the file (SQLite files are safe to copy when not in active write transaction)
-  // For extra safety, we could use `db.$queryRaw` to checkpoint WAL first,
-  // but for this use case a simple copy is sufficient.
-  await fs.copyFile(DB_PATH, backupPath)
+  // Build mysqldump command
+  const authPart = password
+    ? `-u${user} -p${password}`
+    : `-u${user}`
+
+  const cmd = `mysqldump ${authPart} -h${host} -P${port} --single-transaction --routines --triggers ${database} > "${backupPath}"`
+
+  try {
+    execSync(cmd, { stdio: 'pipe', timeout: 120_000 })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`mysqldump failed: ${msg}`)
+  }
+
+  // Check backup file was created
+  if (!existsSync(backupPath)) {
+    throw new Error('Backup file was not created')
+  }
 
   // Get file size
   const stat = await fs.stat(backupPath)
@@ -89,7 +117,7 @@ export async function listBackups(): Promise<BackupInfo[]> {
   const backups: BackupInfo[] = []
 
   for (const filename of files) {
-    if (!filename.endsWith('.db')) continue
+    if (!filename.endsWith('.sql') && !filename.endsWith('.sql.gz')) continue
     const filePath = path.join(BACKUP_DIR, filename)
     try {
       const stat = await fs.stat(filePath)

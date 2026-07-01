@@ -23,7 +23,7 @@ function sanitizeMessage(raw: string): string {
   // Patterns that indicate internal details we don't want to expose
   const internalPatterns = [
     /prisma/i,
-    /sqlite/i,
+    /mysql/i,
     /unique constraint/i,
     /foreign key/i,
     /\/home\//i,

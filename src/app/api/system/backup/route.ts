@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
  * POST /api/system/backup
  * Triggers a manual database backup (admin only).
  *
- * DELETE /api/system/backup?filename=custom-2026-06-18T10-30-00.db
+ * DELETE /api/system/backup?filename=frxai-2026-06-18T10-30-00.sql
  * Deletes a specific backup file (admin only).
  */
 

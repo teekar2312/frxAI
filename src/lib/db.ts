@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@/generated/prisma'
 
 // Versioned cache key — bump when schema changes to force a fresh client
 // that includes newly-added models (avoids stale PrismaClient in dev HMR).

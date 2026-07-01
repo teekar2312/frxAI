@@ -3,10 +3,11 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -56,7 +57,7 @@ model Trade {
   strategy      String   @default("scalping-m5")
   timeframe     String   @default("M5")
   source        String   @default("manual") // manual | auto | ai
-  comment       String?
+  comment       String?  @db.Text
   // MT5 bridge integration: ticket returned by the bridge (null = local-only trade).
   // When non-null, the trade exists on the real (or mock) MT5 bridge and can be
   // reconciled / closed via the bridge's position ticket.
@@ -101,9 +102,9 @@ model Indicator {
   id            String   @id @default(cuid())
   name          String   @unique
   category      String   // trend | oscillator | volume | volatility | channel | regression
-  description   String
-  defaultParams String   // JSON string of params
-  scalpingPreset String? // JSON string of scalping-optimized params
+  description   String   @db.Text
+  defaultParams String   @db.Text // JSON string of params
+  scalpingPreset String? @db.Text // JSON string of scalping-optimized params
   enabled       Boolean  @default(true)
   autoManaged   Boolean  @default(false) // AI can toggle
   weight        Float    @default(1) // AI-assigned weight 0..1
@@ -115,9 +116,9 @@ model Indicator {
 model NewsItem {
   id            String   @id @default(cuid())
   source        String   // finnhub | marketaux | breaking
-  title         String
-  summary       String
-  url           String?
+  title         String   @db.Text
+  summary       String   @db.Text
+  url           String?  @db.Text
   category      String   // central_bank | nfp | cpi | ppi | gdp | unemployment | retail | pmi | geopolitical | fiscal | commodity | sentiment | breaking
   impact        String   @default("medium") // low | medium | high
   sentiment     String   @default("neutral") // bullish | bearish | neutral
@@ -140,7 +141,7 @@ model Alert {
   triggered     Boolean  @default(false)
   triggeredAt   DateTime?
   notifyEmail   Boolean  @default(true)
-  message       String?
+  message       String?  @db.Text
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -153,9 +154,9 @@ model Log {
   id            String   @id @default(cuid())
   level         String   // info | warn | error | debug
   source        String   @default("system") // mt5 | ai | risk | api | ws | backtest
-  message       String
-  stack         String?
-  context       String?  // JSON
+  message       String   @db.Text
+  stack         String?  @db.LongText
+  context       String?  @db.LongText // JSON
   createdAt     DateTime @default(now())
 
   @@index([source])
@@ -181,8 +182,8 @@ model Backtest {
   maxDrawdown   Float
   sharpeRatio   Float
   netProfit     Float
-  equityCurve   String   // JSON array
-  tradesJson    String   // JSON array of trade points
+  equityCurve   String   @db.LongText // JSON array
+  tradesJson    String   @db.LongText // JSON array of trade points
   status        String   @default("completed") // running | completed | failed
   createdAt     DateTime @default(now())
 
@@ -196,9 +197,9 @@ model AiSignal {
   direction     String   // long | short | neutral
   confidence    Float    // 0..100
   timeframe     String   @default("M5")
-  reasoning     String
-  selectedIndicators String // JSON array
-  factors       String   // JSON: central_bank, nfp, cpi, etc scores
+  reasoning     String   @db.LongText
+  selectedIndicators String @db.Text // JSON array
+  factors       String   @db.Text // JSON: central_bank, nfp, cpi, etc scores
   action        String   @default("wait") // buy | sell | wait
   modelVersion  String   @default("fx-scalper-v1")
   accuracy      Float    @default(0) // rolling accuracy %
@@ -240,7 +241,7 @@ model AiSignalOutcome {
 model RiskSetting {
   id            String   @id @default(cuid())
   key           String   @unique
-  value         String
+  value         String   @db.Text
   updatedAt     DateTime @updatedAt
 }
 
@@ -249,7 +250,7 @@ model Notification {
   id            String   @id @default(cuid())
   type          String   // trade_open | trade_close | alert | risk | system | news
   subject       String
-  body          String
+  body          String   @db.Text
   recipient     String
   sent          Boolean  @default(false)
   sentAt        DateTime?
@@ -264,7 +265,7 @@ model Notification {
 model SystemConfig {
   id            String   @id @default(cuid())
   key           String   @unique
-  value         String
+  value         String   @db.Text
   updatedAt     DateTime @updatedAt
 }
 
@@ -296,7 +297,7 @@ model UserSession {
   sessionToken  String   @unique
   expiresAt     DateTime
   ipAddress     String?
-  userAgent     String?
+  userAgent     String?  @db.Text
   createdAt     DateTime @default(now())
 
   @@index([userId])
@@ -308,7 +309,7 @@ model UserSession {
 // retail sales, PMI, central bank rate decisions, press conferences.
 model EconomicEvent {
   id            String   @id @default(cuid())
-  title         String
+  title         String   @db.Text
   country       String   // US | EU | GB | JP
   currency      String   // USD | EUR | GBP | JPY
   category      String   // interest_rate | nfp | cpi | ppi | gdp | unemployment | retail | pmi | speech | other
@@ -317,7 +318,7 @@ model EconomicEvent {
   actual        String?
   forecast      String?
   previous      String?
-  surprise      String?  // computed surprise description
+  surprise      String?  @db.Text // computed surprise description
   symbols       String   @default("") // comma separated affected pairs
   status        String   @default("upcoming") // upcoming | released | cancelled
   source        String   @default("marketaux")
