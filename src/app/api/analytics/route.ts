@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, accounts, eq, and, gte, lte, asc } from '@/lib/db'
 import { getSessions } from '@/lib/sessions'
 import type { TradeAnalytics } from '@/lib/types'
 import { apiCatch } from '@/lib/api-handler'
@@ -16,12 +16,11 @@ export async function GET(req: NextRequest) {
     const from = new Date()
     from.setUTCDate(from.getUTCDate() - days)
 
-    const where: any = { status: 'closed', closeTime: { gte: from } }
-    if (accountId) where.accountId = accountId
-
-    const trades = await db.trade.findMany({
-      where,
-      orderBy: { closeTime: 'asc' },
+    const trades = await db.query.trades.findMany({
+      where: accountId
+        ? and(eq(trades.status, 'closed'), gte(trades.closeTime, from), eq(trades.accountId, accountId))
+        : and(eq(trades.status, 'closed'), gte(trades.closeTime, from)),
+      orderBy: asc(trades.closeTime),
     })
 
     const totalClosed = trades.length
@@ -193,10 +192,10 @@ export async function GET(req: NextRequest) {
     // Get the account balance for percentage calculation
     let balance = 10000
     if (accountId) {
-      const acct = await db.account.findUnique({ where: { id: accountId }, select: { balance: true } })
+      const acct = await db.select({ balance: accounts.balance }).from(accounts).where(eq(accounts.id, accountId)).limit(1).then(r => r[0])
       if (acct) balance = acct.balance || 10000
     } else {
-      const defAcct = await db.account.findFirst({ where: { isDefault: true }, select: { balance: true } })
+      const defAcct = await db.select({ balance: accounts.balance }).from(accounts).where(eq(accounts.isDefault, true)).limit(1).then(r => r[0])
       if (defAcct) balance = defAcct.balance || 10000
     }
     const maxDrawdownPct = balance > 0 ? (maxDrawdown / balance) * 100 : 0

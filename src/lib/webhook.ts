@@ -1,5 +1,6 @@
 import 'server-only'
-import { db } from './db'
+import { db, like } from './db'
+import { systemConfigs, logs, generateId } from './db'
 
 /* =================================================
    Webhook Notifications (Discord / Telegram / Slack)
@@ -51,9 +52,7 @@ const DEFAULT_COLOR_MAP: Record<WebhookEventType, number> = {
 /** Read webhook_* keys from SystemConfig (key-value table). */
 async function getWebhookConfig(): Promise<WebhookConfig> {
   try {
-    const configs = await db.systemConfig.findMany({
-      where: { key: { startsWith: 'webhook_' } },
-    })
+    const configs = await db.select().from(systemConfigs).where(like(systemConfigs.key, 'webhook_%'))
     const map: Record<string, string> = {}
     for (const c of configs) map[c.key] = c.value
     return {
@@ -214,12 +213,11 @@ export async function sendWebhook(event: WebhookEvent): Promise<void> {
 
     // --- Log the webhook send (best-effort) ---
     try {
-      await db.log.create({
-        data: {
-          level: 'info',
-          source: 'system',
-          message: `Webhook sent (${targets.join(',')}): ${event.type} — ${event.title}`,
-        },
+      await db.insert(logs).values({
+        id: generateId(),
+        level: 'info',
+        source: 'system',
+        message: `Webhook sent (${targets.join(',')}): ${event.type} — ${event.title}`,
       })
     } catch {
       // Logging is best-effort; ignore.

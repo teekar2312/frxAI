@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-server'
-import { db } from '@/lib/db'
+import { db, users, eq } from '@/lib/db'
 import { verifyPassword, hashPassword } from '@/lib/auth'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateBody, passwordChangeSchema } from '@/lib/validations'
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const { currentPassword, newPassword } = validated.data
 
     // Verify current password
-    const dbUser = await db.user.findUnique({ where: { id: user.id } })
+    const dbUser = await db.query.users.findFirst({ where: eq(users.id, user.id) })
     if (!dbUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
@@ -48,10 +48,7 @@ export async function POST(req: NextRequest) {
 
     // Update password
     const passwordHash = await hashPassword(newPassword)
-    await db.user.update({
-      where: { id: user.id },
-      data: { passwordHash },
-    })
+    await db.update(users).set({ passwordHash }).where(eq(users.id, user.id))
 
     await audit({ action: 'user.update', resource: user.id, resourceType: 'user', actor: user.email, details: { field: 'password' } })
 

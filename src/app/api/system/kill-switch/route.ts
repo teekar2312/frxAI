@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, riskSettings, accounts, trades, eq, and, asc } from '@/lib/db'
 import { logInfo, logWarn } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
 import { atomicCloseTrade } from '@/lib/db-transactions'
@@ -51,20 +51,17 @@ export async function POST(req: NextRequest) {
 
     // ── 1. Disable auto-trading IMMEDIATELY ────────────────────────────────────
     // This is the first action — even if close-all fails, auto-trade stays off.
-    await db.riskSetting.upsert({
-      where: { key: 'autoTradingEnabled' },
-      create: { key: 'autoTradingEnabled', value: 'false' },
-      update: { value: 'false' },
-    })
+    await db.insert(riskSettings).values({ key: 'autoTradingEnabled', value: 'false' })
+      .onDuplicateKeyUpdate({ set: { value: 'false' } })
 
     await logWarn('risk', `🚨 KILL SWITCH ACTIVATED by ${triggeredBy}: auto-trading DISABLED (reason: ${reason})`)
 
     // ── 2. Resolve account ─────────────────────────────────────────────────────
     let account = null
     if (parsed.data.accountId) {
-      account = await db.account.findUnique({ where: { id: parsed.data.accountId } })
+      account = await db.query.accounts.findFirst({ where: eq(accounts.id, parsed.data.accountId) })
     } else {
-      account = await db.account.findFirst({ where: { isDefault: true } })
+      account = await db.query.accounts.findFirst({ where: eq(accounts.isDefault, true) })
     }
     if (!account) {
       return NextResponse.json({
@@ -79,9 +76,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 3. Close ALL open positions ────────────────────────────────────────────
-    const openTrades = await db.trade.findMany({
-      where: { accountId: account.id, status: 'open' },
-      orderBy: { openTime: 'asc' },
+    const openTrades = await db.query.trades.findMany({
+      where: and(eq(trades.accountId, account.id), eq(trades.status, 'open')),
+      orderBy: asc(trades.openTime),
     })
 
     const closed: any[] = []

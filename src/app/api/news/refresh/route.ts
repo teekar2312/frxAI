@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, newsItems } from '@/lib/db'
 import { logInfo, logError } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -113,19 +113,17 @@ Return ONLY the JSON array.`,
     const now = new Date()
     const created: any[] = []
     for (const d of drafts) {
-      const item = await db.newsItem.create({
-        data: {
-          source: 'marketaux',
-          title: d.title,
-          summary: d.summary,
-          url: null,
-          category: d.category,
-          impact: d.impact,
-          sentiment: d.sentiment,
-          symbols: d.symbols,
-          publishedAt: now,
-        },
-      })
+      const [item] = await db.insert(newsItems).values({
+        source: 'marketaux',
+        title: d.title,
+        summary: d.summary,
+        url: null,
+        category: d.category,
+        impact: d.impact,
+        sentiment: d.sentiment,
+        symbols: d.symbols,
+        publishedAt: now,
+      }).returning()
       created.push(item)
     }
 

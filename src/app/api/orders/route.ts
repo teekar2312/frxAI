@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, orders, accounts, eq, and, desc } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { requireAuth, requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -18,15 +18,16 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const accountId = searchParams.get('accountId')
 
-    const where: Record<string, unknown> = { status: 'pending' }
-    if (accountId) where.accountId = accountId
+    const conditions = [eq(orders.status, 'pending')]
+    if (accountId) conditions.push(eq(orders.accountId, accountId))
+    const whereClause = conditions.length > 1 ? and(...conditions) : conditions[0]
 
-    const orders = await db.order.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
+    const ordersList = await db.query.orders.findMany({
+      where: whereClause,
+      orderBy: desc(orders.createdAt),
     })
 
-    return NextResponse.json({ orders })
+    return NextResponse.json({ orders: ordersList })
   } catch (e) {
     return apiCatch(e, 'orders', 'GET', req)
   }
@@ -49,24 +50,22 @@ export async function POST(req: NextRequest) {
     }
     const { accountId, symbol, side, orderType, lotSize, price, stopLoss, takeProfit } = validated.data
 
-    const account = await db.account.findUnique({ where: { id: accountId } })
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.id, accountId) })
     if (!account) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
-    const order = await db.order.create({
-      data: {
-        accountId,
-        symbol,
-        side,
-        orderType,
-        lotSize: Number(lotSize),
-        price: Number(price),
-        stopLoss: stopLoss != null ? Number(stopLoss) : null,
-        takeProfit: takeProfit != null ? Number(takeProfit) : null,
-        status: 'pending',
-      },
-    })
+    const order = await db.insert(orders).values({
+      accountId,
+      symbol,
+      side,
+      orderType,
+      lotSize: Number(lotSize),
+      price: Number(price),
+      stopLoss: stopLoss != null ? Number(stopLoss) : null,
+      takeProfit: takeProfit != null ? Number(takeProfit) : null,
+      status: 'pending',
+    }).returning().then(r => r[0]!)
 
     await audit({ action: 'order.create', resource: order.id, resourceType: 'order', actor: user.email, details: { symbol: order.symbol, side: order.side, lotSize: order.lotSize, price: order.price, orderType: order.orderType } })
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRiskConfig, isDailyLossCircuitBreakerActive, enforceTradeOpen } from '@/lib/risk-enforcement'
 import { requireAuth } from '@/lib/auth-server'
-import { db } from '@/lib/db'
+import { db, accounts, trades, eq, and } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ config: cfg })
     }
 
-    const account = await db.account.findUnique({ where: { id: accountId } })
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.id, accountId) })
     if (!account) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
@@ -49,8 +49,8 @@ export async function GET(req: NextRequest) {
     })
 
     // Count open positions + total lot
-    const openTrades = await db.trade.findMany({
-      where: { accountId, status: 'open' },
+    const openTrades = await db.query.trades.findMany({
+      where: and(eq(trades.accountId, accountId), eq(trades.status, 'open')),
     })
 
     return NextResponse.json({

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, indicators, eq, desc } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited
 
   try {
-    const all = await db.indicator.findMany({ orderBy: { weight: 'desc' } })
+    const all = await db.query.indicators.findMany({ orderBy: desc(indicators.weight) })
     const alwaysOn = new Set(['ATR', 'Bollinger Bands', 'Bollinger', 'VWAP'])
 
     const top12Ids = new Set(all.slice(0, 12).map((i) => i.id))
@@ -39,20 +39,20 @@ export async function POST(req: NextRequest) {
       const shouldEnable = isAlwaysOn || isStrongTrendOrOsc || inTop
       const autoManaged = true
 
-      return db.indicator.update({
-        where: { id: ind.id },
-        data: { enabled: shouldEnable, autoManaged },
-      })
+      return db.update(indicators).set({ enabled: shouldEnable, autoManaged }).where(eq(indicators.id, ind.id))
     })
 
-    const indicators = await Promise.all(updates)
+    await Promise.all(updates)
+
+    // Re-fetch all indicators after updates
+    const updatedIndicators = await db.query.indicators.findMany({ orderBy: desc(indicators.weight) })
 
     await logInfo('ai', 'AI re-selected indicator pool', {
-      total: indicators.length,
-      enabled: indicators.filter((i) => i.enabled).length,
+      total: updatedIndicators.length,
+      enabled: updatedIndicators.filter((i) => i.enabled).length,
     })
 
-    return NextResponse.json({ indicators })
+    return NextResponse.json({ indicators: updatedIndicators })
   } catch (e) {
     return apiCatch(e, 'indicators', 'POST', req)
   }

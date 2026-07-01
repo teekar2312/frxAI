@@ -1,5 +1,6 @@
 import 'server-only'
-import { db } from './db'
+import { db, eq, and, gte, lte, asc } from './db'
+import { economicEvents } from './db'
 
 export interface NewsAvoidanceResult {
   hasUpcomingHighImpact: boolean
@@ -26,13 +27,13 @@ export async function checkNewsAvoidance(symbol: string): Promise<NewsAvoidanceR
   const windowEnd = new Date(now.getTime() + 60 * 60 * 1000) // next 60 min
 
   // Find upcoming events whose symbols include this pair
-  const events = await db.economicEvent.findMany({
-    where: {
-      eventTime: { gte: now, lte: windowEnd },
-      status: 'upcoming',
-    },
-    orderBy: { eventTime: 'asc' },
-  })
+  const events = await db.select().from(economicEvents).where(
+    and(
+      gte(economicEvents.eventTime, now),
+      lte(economicEvents.eventTime, windowEnd),
+      eq(economicEvents.status, 'upcoming'),
+    ),
+  ).orderBy(asc(economicEvents.eventTime))
 
   // Filter to events affecting this symbol
   const relevant = events.filter((e) => {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, systemConfigs, eq } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateBody, systemConfigSchema } from '@/lib/validations'
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const rows = await db.systemConfig.findMany()
+    const rows = await db.query.systemConfigs.findMany()
     const config: Record<string, string> = {}
     for (const r of rows) config[r.key] = r.value
     return NextResponse.json({ config })
@@ -41,20 +41,17 @@ export async function PATCH(req: NextRequest) {
     // Collect old values BEFORE write (for audit diff)
     const oldValues: Record<string, string> = {}
     for (const [key] of entries) {
-      const existing = await db.systemConfig.findUnique({ where: { key } })
+      const existing = await db.query.systemConfigs.findFirst({ where: eq(systemConfigs.key, key) })
       oldValues[key] = existing?.value || ''
     }
 
     // Perform all upserts in a transaction
-    await db.$transaction(
-      entries.map(([key, value]) =>
-        db.systemConfig.upsert({
-          where: { key },
-          update: { value: String(value) },
-          create: { key, value: String(value) },
-        }),
-      ),
-    )
+    await db.transaction(async (tx) => {
+      for (const [key, value] of entries) {
+        await tx.insert(systemConfigs).values({ key, value: String(value) })
+          .onDuplicateKeyUpdate({ set: { value: String(value) } })
+      }
+    })
 
     // Audit AFTER successful write
     for (const [key, value] of entries) {
@@ -66,7 +63,7 @@ export async function PATCH(req: NextRequest) {
       })
     }
 
-    const rows = await db.systemConfig.findMany()
+    const rows = await db.query.systemConfigs.findMany()
     const config: Record<string, string> = {}
     for (const r of rows) config[r.key] = r.value
     return NextResponse.json({ config })

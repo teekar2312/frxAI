@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, riskSettings, eq } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const rows = await db.riskSetting.findMany()
+    const rows = await db.query.riskSettings.findMany()
     const settings: Record<string, string> = {}
     for (const r of rows) settings[r.key] = r.value
     return NextResponse.json({ settings })
@@ -42,23 +42,20 @@ export async function PATCH(req: NextRequest) {
     }
 
     const keys = Object.keys(validated.data.settings)
-    await db.$transaction(async (tx) => {
+    await db.transaction(async (tx) => {
       for (const key of keys) {
-        const existing = await tx.riskSetting.findUnique({ where: { key } })
+        const existing = await tx.query.riskSettings.findFirst({ where: eq(riskSettings.key, key) })
         const oldValue = existing?.value || ''
         const newValue = String(validated.data.settings[key])
 
-        await tx.riskSetting.upsert({
-          where: { key },
-          create: { key, value: newValue },
-          update: { value: newValue },
-        })
+        await tx.insert(riskSettings).values({ key, value: newValue })
+          .onDuplicateKeyUpdate({ set: { value: newValue } })
 
         await auditRisk.settingChange(key, oldValue, newValue, 'system')
       }
     })
 
-    const rows = await db.riskSetting.findMany()
+    const rows = await db.query.riskSettings.findMany()
     const settings: Record<string, string> = {}
     for (const r of rows) settings[r.key] = r.value
 

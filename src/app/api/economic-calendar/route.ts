@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, economicEvents, gte, lte, eq, and, asc } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
@@ -20,18 +20,16 @@ export async function GET(req: NextRequest) {
     const to = new Date()
     to.setUTCDate(to.getUTCDate() + days)
 
-    const where: any = {
-      eventTime: { gte: from, lte: to },
-    }
-    if (impact) where.impact = impact
-    if (country) where.country = country
-    if (status) where.status = status
-    if (category) where.category = category
+    const conditions = [gte(economicEvents.eventTime, from), lte(economicEvents.eventTime, to)]
+    if (impact) conditions.push(eq(economicEvents.impact, impact))
+    if (country) conditions.push(eq(economicEvents.country, country))
+    if (status) conditions.push(eq(economicEvents.status, status))
+    if (category) conditions.push(eq(economicEvents.category, category))
 
-    const events = await db.economicEvent.findMany({
-      where,
-      orderBy: { eventTime: 'asc' },
-      take: limit,
+    const events = await db.query.economicEvents.findMany({
+      where: and(...conditions),
+      orderBy: asc(economicEvents.eventTime),
+      limit,
     })
 
     return NextResponse.json({ events, total: events.length })

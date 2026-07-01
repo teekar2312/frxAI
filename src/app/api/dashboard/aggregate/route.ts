@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { apiCatch } from '@/lib/api-handler'
 import { buildEquitySpark } from '@/lib/equity-spark'
-import { db } from '@/lib/db'
+import { db, accounts, trades, eq, gte, lte, desc, asc } from '@/lib/db'
 import {
   SUPPORTED_SYMBOLS,
   SYMBOL_BASE,
@@ -71,8 +71,8 @@ function buildSymbols(): SymbolQuote[] {
 
 export async function GET() {
   try {
-    const accounts = await db.account.findMany({
-      orderBy: { createdAt: 'asc' },
+    const accounts = await db.query.accounts.findMany({
+      orderBy: asc(accounts.createdAt),
     })
 
     const now = new Date()
@@ -85,16 +85,17 @@ export async function GET() {
 
     // Parallel fetches for open + closed-today trades across ALL accounts.
     const [allOpenTrades, allTodayClosedTrades] = await Promise.all([
-      db.trade.findMany({
-        where: { status: 'open' },
-        orderBy: { openTime: 'desc' },
+      db.query.trades.findMany({
+        where: eq(trades.status, 'open'),
+        orderBy: desc(trades.openTime),
       }),
-      db.trade.findMany({
-        where: {
-          status: 'closed',
-          closeTime: { gte: utcStart, lte: utcEnd },
-        },
-        orderBy: { closeTime: 'desc' },
+      db.query.trades.findMany({
+        where: and(
+          eq(trades.status, 'closed'),
+          gte(trades.closeTime, utcStart),
+          lte(trades.closeTime, utcEnd),
+        ),
+        orderBy: desc(trades.closeTime),
       }),
     ])
 

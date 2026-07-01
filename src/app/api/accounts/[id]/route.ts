@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, accounts, eq, ne, and } from '@/lib/db'
 import { atomicDeleteAccount } from '@/lib/db-transactions'
 import { requireAdmin } from '@/lib/auth-server'
 import { apiCatch } from '@/lib/api-handler'
@@ -21,22 +21,19 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await req.json()
-    const existing = await db.account.findUnique({ where: { id } })
+    const existing = await db.query.accounts.findFirst({ where: eq(accounts.id, id) })
     if (!existing) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
     // If marking as default, unset others — atomic via transaction
     if (body.isDefault === true) {
-      await db.$transaction(async (tx) => {
-        await tx.account.updateMany({
-          where: { isDefault: true, NOT: { id } },
-          data: { isDefault: false },
-        })
-        await tx.account.update({ where: { id }, data: { isDefault: true } })
+      await db.transaction(async (tx) => {
+        await tx.update(accounts).set({ isDefault: false }).where(and(eq(accounts.isDefault, true), ne(accounts.id, id)))
+        await tx.update(accounts).set({ isDefault: true }).where(eq(accounts.id, id))
       })
       // Re-fetch after transaction
-      const updated = await db.account.findUnique({ where: { id } })
+      const updated = await db.query.accounts.findFirst({ where: eq(accounts.id, id) })
 
       await audit({ action: 'account.update', resource: id, resourceType: 'account', actor: user.email, details: { isDefault: true } })
 
@@ -56,9 +53,12 @@ export async function PATCH(
       }
     }
 
-    const account = await db.account.update({ where: { id }, data })
+    await db.update(accounts).set(data).where(eq(accounts.id, id))
 
     await audit({ action: 'account.update', resource: id, resourceType: 'account', actor: user.email, details: { updatedFields: Object.keys(data) } })
+
+    // Re-fetch to return updated record
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.id, id) })
 
     return NextResponse.json({ account })
   } catch (e) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { requireAuth } from '@/lib/auth-server'
 import { getBars, bridgeHealth, type MT5Bar, type MT5Timeframe } from '@/lib/mt5-client'
 import { priceAt, SYMBOL_BASE } from '@/lib/market'
@@ -32,7 +32,7 @@ export async function GET(
 
   try {
     const { id } = await params
-    const trade = await db.trade.findUnique({ where: { id } })
+    const trade = await db.query.trades.findFirst({ where: eq(trades.id, id) })
     if (!trade) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
     }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, economicEvents, gte, asc } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -41,20 +41,18 @@ Return ONLY a JSON array. Vary the times during market hours (6:00-20:00 UTC).`,
         const items = JSON.parse(match[0])
         for (const item of items) {
           if (!item.title || !item.eventTime || !item.currency) continue
-          await db.economicEvent.create({
-            data: {
-              title: String(item.title).slice(0, 200),
-              country: String(item.country || 'US'),
-              currency: String(item.currency),
-              category: String(item.category || 'other'),
-              impact: String(item.impact || 'medium'),
-              eventTime: new Date(item.eventTime),
-              forecast: item.forecast ? String(item.forecast) : null,
-              previous: item.previous ? String(item.previous) : null,
-              symbols: String(item.symbols || ''),
-              status: 'upcoming',
-              source: 'marketaux',
-            },
+          await db.insert(economicEvents).values({
+            title: String(item.title).slice(0, 200),
+            country: String(item.country || 'US'),
+            currency: String(item.currency),
+            category: String(item.category || 'other'),
+            impact: String(item.impact || 'medium'),
+            eventTime: new Date(item.eventTime),
+            forecast: item.forecast ? String(item.forecast) : null,
+            previous: item.previous ? String(item.previous) : null,
+            symbols: String(item.symbols || ''),
+            status: 'upcoming',
+            source: 'marketaux',
           })
           synthesized++
         }
@@ -70,9 +68,7 @@ Return ONLY a JSON array. Vary the times during market hours (6:00-20:00 UTC).`,
         const d = new Date(now)
         d.setUTCDate(d.getUTCDate() + days)
         d.setUTCHours(h, 0, 0, 0)
-        return db.economicEvent.create({
-          data: { title, country, currency, category, impact, eventTime: d, symbols, forecast: forecast ?? null, previous: previous ?? null, status: 'upcoming', source: 'marketaux' },
-        })
+        return db.insert(economicEvents).values({ title, country, currency, category, impact, eventTime: d, symbols, forecast: forecast ?? null, previous: previous ?? null, status: 'upcoming', source: 'marketaux' })
       }
       await mk(1, 12, 'US Core CPI (MoM)', 'US', 'USD', 'cpi', 'high', 'EURUSD,USDJPY,XAUUSD', '0.3%', '0.3%')
       await mk(2, 18, 'FOMC Interest Rate Decision', 'US', 'USD', 'interest_rate', 'high', 'EURUSD,USDJPY,GBPUSD,XAUUSD', '4.50-4.75%', '4.75-5.00%')
@@ -82,10 +78,10 @@ Return ONLY a JSON array. Vary the times during market hours (6:00-20:00 UTC).`,
 
     await logInfo('system', `Economic calendar refreshed: ${synthesized} new events`)
 
-    const events = await db.economicEvent.findMany({
-      where: { eventTime: { gte: new Date() } },
-      orderBy: { eventTime: 'asc' },
-      take: 30,
+    const events = await db.query.economicEvents.findMany({
+      where: gte(economicEvents.eventTime, new Date()),
+      orderBy: asc(economicEvents.eventTime),
+      limit: 30,
     })
     return NextResponse.json({ events, added: synthesized })
   } catch (e) {

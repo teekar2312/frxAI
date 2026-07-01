@@ -11,7 +11,8 @@
 //   - debug logs: 3 days
 
 import 'server-only'
-import { db } from './db'
+import { db, eq, and, lt, asc, exists, not, sql } from './db'
+import { logs, aiSignals, aiSignalOutcomes, countAll } from './db'
 import { logInfo } from './logger'
 
 const RETENTION_DAYS: Record<string, number> = {
@@ -39,14 +40,12 @@ export async function cleanupOldLogs(): Promise<CleanupResult> {
   for (const [level, days] of Object.entries(RETENTION_DAYS)) {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
     try {
-      const result = await db.log.deleteMany({
-        where: {
-          level,
-          createdAt: { lt: cutoff },
-        },
-      })
-      byLevel[level] = result.count
-      totalDeleted += result.count
+      const result = await db.delete(logs).where(
+        and(eq(logs.level, level), lt(logs.createdAt, cutoff)),
+      )
+      const deletedCount = Number(result.affectedRows ?? 0)
+      byLevel[level] = deletedCount
+      totalDeleted += deletedCount
     } catch (e: any) {
       // Log but don't throw — cleanup is best-effort
       console.error(`[log-cleanup] Failed to delete ${level} logs:`, e.message)
@@ -75,22 +74,22 @@ export async function getLogStats(): Promise<{
   oldestLog: Date | null
   estimatedSizeKB: number
 }> {
-  const [totalLogs, byLevelRaw, oldest] = await Promise.all([
-    db.log.count(),
-    db.log.groupBy({ by: ['level'], _count: true }),
-    db.log.findFirst({ orderBy: { createdAt: 'asc' }, select: { createdAt: true } }),
+  const [totalResult, byLevelRaw, oldest] = await Promise.all([
+    db.select({ count: countAll }).from(logs).then(r => r[0].count),
+    db.select({ level: logs.level, count: countAll }).from(logs).groupBy(logs.level),
+    db.select({ createdAt: logs.createdAt }).from(logs).orderBy(asc(logs.createdAt)).limit(1).then(r => r[0] ?? null),
   ])
 
   const byLevel: Record<string, number> = {}
   for (const row of byLevelRaw) {
-    byLevel[row.level] = row._count
+    byLevel[row.level] = row.count
   }
 
   // Rough size estimate: average log row ~500 bytes
-  const estimatedSizeKB = Math.round(totalLogs * 500 / 1024)
+  const estimatedSizeKB = Math.round(totalResult * 500 / 1024)
 
   return {
-    totalLogs,
+    totalLogs: totalResult,
     byLevel,
     oldestLog: oldest?.createdAt ?? null,
     estimatedSizeKB,
@@ -114,29 +113,31 @@ export async function cleanupOldSignals(): Promise<{ deleted: number; durationMs
   try {
     // Delete evaluated signals older than 30 days (cascade deletes outcome)
     const cutoffEvaluated = new Date(Date.now() - SIGNAL_RETENTION_DAYS.evaluated * 24 * 60 * 60 * 1000)
-    const r1 = await db.aiSignal.deleteMany({
-      where: {
-        outcome: { isNot: null },
-        createdAt: { lt: cutoffEvaluated },
-      },
-    })
+    const r1 = await db.delete(aiSignals).where(
+      and(
+        exists(db.select({ one: sql`1` }).from(aiSignalOutcomes).where(eq(aiSignalOutcomes.signalId, aiSignals.id))),
+        lt(aiSignals.createdAt, cutoffEvaluated),
+      ),
+    )
 
     // Delete unevaluated signals older than 7 days (likely never will be evaluated)
     const cutoffUnevaluated = new Date(Date.now() - SIGNAL_RETENTION_DAYS.unevaluated * 24 * 60 * 60 * 1000)
-    const r2 = await db.aiSignal.deleteMany({
-      where: {
-        outcome: { is: null },
-        createdAt: { lt: cutoffUnevaluated },
-      },
-    })
+    const r2 = await db.delete(aiSignals).where(
+      and(
+        not(exists(db.select({ one: sql`1` }).from(aiSignalOutcomes).where(eq(aiSignalOutcomes.signalId, aiSignals.id)))),
+        lt(aiSignals.createdAt, cutoffUnevaluated),
+      ),
+    )
 
-    const totalDeleted = r1.count + r2.count
+    const deletedCount1 = Number(r1.affectedRows ?? 0)
+    const deletedCount2 = Number(r2.affectedRows ?? 0)
+    const totalDeleted = deletedCount1 + deletedCount2
     const durationMs = Date.now() - start
 
     if (totalDeleted > 0) {
       await logInfo('system', `Signal cleanup: deleted ${totalDeleted} old signal(s) (${durationMs}ms)`, {
-        evaluated: r1.count,
-        unevaluated: r2.count,
+        evaluated: deletedCount1,
+        unevaluated: deletedCount2,
       })
     }
 

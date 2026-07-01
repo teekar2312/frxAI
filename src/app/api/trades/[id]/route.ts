@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { tradeUpdateSchema, validateBody } from '@/lib/validations'
@@ -21,7 +21,7 @@ export async function PATCH(
     const { id } = await params
     const body = await req.json()
 
-    const existing = await db.trade.findUnique({ where: { id } })
+    const existing = await db.query.trades.findFirst({ where: eq(trades.id, id) })
     if (!existing) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
     }
@@ -36,7 +36,7 @@ export async function PATCH(
     if (!result.success) return result.error
     const data = result.data
 
-    const trade = await db.trade.update({ where: { id }, data })
+    const trade = await db.update(trades).set(data).where(eq(trades.id, id)).returning().then(r => r[0]!)
     return NextResponse.json({ trade })
   } catch (e) {
     return apiCatch(e, 'trades', 'PATCH', req)

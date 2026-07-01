@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, accounts, trades, newsItems, aiSignals, eq, and, gte, lte, desc, asc } from '@/lib/db'
 import {
   SUPPORTED_SYMBOLS,
   SYMBOL_BASE,
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const requestedAccountId = searchParams.get('accountId')
 
-    const accounts = await db.account.findMany({ orderBy: { createdAt: 'asc' } })
+    const accounts = await db.query.accounts.findMany({ orderBy: asc(accounts.createdAt) })
     // Resolve: requested accountId → default → first → null
     const defaultAccount = (requestedAccountId && accounts.find((a) => a.id === requestedAccountId))
       || accounts.find((a) => a.isDefault)
@@ -91,9 +91,9 @@ export async function GET(req: NextRequest) {
     let todayPnlPct = 0
 
     if (defaultAccount) {
-      openTrades = await db.trade.findMany({
-        where: { accountId: defaultAccount.id, status: 'open' },
-        orderBy: { openTime: 'desc' },
+      openTrades = await db.query.trades.findMany({
+        where: and(eq(trades.accountId, defaultAccount.id), eq(trades.status, 'open')),
+        orderBy: desc(trades.openTime),
       })
 
       const now = new Date()
@@ -103,13 +103,14 @@ export async function GET(req: NextRequest) {
       const utcEnd = new Date(
         Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999),
       )
-      todayClosedTrades = await db.trade.findMany({
-        where: {
-          accountId: defaultAccount.id,
-          status: 'closed',
-          closeTime: { gte: utcStart, lte: utcEnd },
-        },
-        orderBy: { closeTime: 'desc' },
+      todayClosedTrades = await db.query.trades.findMany({
+        where: and(
+          eq(trades.accountId, defaultAccount.id),
+          eq(trades.status, 'closed'),
+          gte(trades.closeTime, utcStart),
+          lte(trades.closeTime, utcEnd),
+        ),
+        orderBy: desc(trades.closeTime),
       })
       todayPnl = todayClosedTrades.reduce((s, t) => s + (t.pnl || 0), 0)
       const balance = defaultAccount.balance || 0
@@ -120,14 +121,14 @@ export async function GET(req: NextRequest) {
 
     const sessions: TradingSession[] = [...getSessions(), getOverlap()]
 
-    const topNews = await db.newsItem.findMany({
-      orderBy: { publishedAt: 'desc' },
-      take: 6,
+    const topNews = await db.query.newsItems.findMany({
+      orderBy: desc(newsItems.publishedAt),
+      limit: 6,
     })
 
-    const latestSignals = await db.aiSignal.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: 8,
+    const latestSignals = await db.query.aiSignals.findMany({
+      orderBy: desc(aiSignals.createdAt),
+      limit: 8,
     })
 
     const equitySpark = buildEquitySpark(defaultAccount?.balance ?? 10000, todayPnl)

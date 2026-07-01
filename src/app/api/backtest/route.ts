@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, backtests as backtestsTable, eq, desc } from '@/lib/db'
 import { runBacktest } from '@/lib/backtest'
 import { findStrategy } from '@/lib/strategies'
 import { apiCatch } from '@/lib/api-handler'
@@ -15,15 +15,11 @@ export async function GET(req: NextRequest) {
     const symbol = searchParams.get('symbol') || undefined
     const limit = parseInt(searchParams.get('limit') || '20', 10)
 
-    const where: any = {}
-    if (symbol) where.symbol = symbol
-
-    const backtests = await db.backtest.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: Math.max(1, Math.min(200, limit)),
-    })
-    return NextResponse.json({ backtests })
+    const rows = await db.select().from(backtestsTable)
+      .where(symbol ? eq(backtestsTable.symbol, symbol) : undefined)
+      .orderBy(desc(backtestsTable.createdAt))
+      .limit(Math.max(1, Math.min(200, limit)))
+    return NextResponse.json({ backtests: rows })
   } catch (e) {
     return apiCatch(e, 'backtest', 'GET', req)
   }

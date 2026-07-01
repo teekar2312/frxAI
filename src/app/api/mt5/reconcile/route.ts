@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireServiceAuth } from '@/lib/service-auth'
 import { requireAuth } from '@/lib/auth-server'
 import { reconcileAccountPositions, reconcileAllAccounts } from '@/lib/reconciliation'
-import { db } from '@/lib/db'
+import { db, accounts, eq } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { reconcileSchema, validateBody } from '@/lib/validations'
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
     if (accountId) {
       // Reconcile single account
-      const account = await db.account.findUnique({ where: { id: accountId } })
+      const account = await db.query.accounts.findFirst({ where: eq(accounts.id, accountId) })
       if (!account) {
         return NextResponse.json({ error: 'Account not found' }, { status: 404 })
       }

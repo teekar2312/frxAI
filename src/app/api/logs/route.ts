@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, logs, eq, and, desc } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { logCreateSchema, validateBody } from '@/lib/validations'
@@ -22,16 +22,17 @@ export async function GET(req: NextRequest) {
     const source = searchParams.get('source') || undefined
     const limit = parseInt(searchParams.get('limit') || '200', 10)
 
-    const where: any = {}
-    if (level) where.level = level
-    if (source) where.source = source
+    const conditions = []
+    if (level) conditions.push(eq(logs.level, level))
+    if (source) conditions.push(eq(logs.source, source))
+    const whereClause = conditions.length > 1 ? and(...conditions) : conditions.length === 1 ? conditions[0] : undefined
 
-    const logs = await db.log.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: Math.max(1, Math.min(1000, limit)),
+    const logsList = await db.query.logs.findMany({
+      where: whereClause,
+      orderBy: desc(logs.createdAt),
+      limit: Math.max(1, Math.min(1000, limit)),
     })
-    return NextResponse.json({ logs })
+    return NextResponse.json({ logs: logsList })
   } catch (e) {
     return apiCatch(e, 'logs', 'GET', req)
   }
@@ -47,15 +48,13 @@ export async function POST(req: NextRequest) {
     if (!validated.success) return NextResponse.json(validated.error, { status: validated.error.status })
     const { level, source, message, stack, context } = validated.data
 
-    const log = await db.log.create({
-      data: {
-        level,
-        source,
-        message: String(message),
-        stack: stack ? String(stack) : null,
-        context: context ? (typeof context === 'string' ? context : JSON.stringify(context)) : null,
-      },
-    })
+    const log = await db.insert(logs).values({
+      level,
+      source,
+      message: String(message),
+      stack: stack ? String(stack) : null,
+      context: context ? (typeof context === 'string' ? context : JSON.stringify(context)) : null,
+    }).returning().then(r => r[0]!)
     return NextResponse.json({ log })
   } catch (e) {
     return apiCatch(e, 'logs', 'POST', req)
@@ -70,7 +69,7 @@ export async function DELETE(req: NextRequest) {
   if (limited) return limited
 
   try {
-    await db.log.deleteMany({})
+    await db.delete(logs)
     return NextResponse.json({ ok: true })
   } catch (e) {
     return apiCatch(e, 'logs', 'DELETE')

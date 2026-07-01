@@ -6,8 +6,7 @@
 //   3. Consistency (if any write fails, all roll back)
 
 import 'server-only'
-import type { Trade, Account } from '@prisma/client'
-import { db } from './db'
+import { db, trades, accounts, orders, eq, and, sql, countAll, type Trade, type Account } from './db'
 import { logInfo } from './logger'
 
 /**
@@ -33,29 +32,26 @@ export async function atomicCloseTrade(
   | { alreadyClosed: true; trade: null; account: null }
   | { alreadyClosed: false; trade: Trade; account: Account | null }
 > {
-  return db.$transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     // Conditional update: only succeeds if status is still 'open'.
-    // If another request closed it first, affectedCount = 0.
-    const result = await tx.trade.updateMany({
-      where: { id: tradeId, status: 'open' },
-      data: {
-        status: 'closed',
-        closePrice: params.closePrice,
-        closeTime: new Date(),
-        pnl: params.pnl,
-        pips: params.pips,
-      },
-    })
+    // If another request closed it first, affectedRows = 0.
+    const result = await tx.update(trades).set({
+      status: 'closed',
+      closePrice: params.closePrice,
+      closeTime: new Date(),
+      pnl: params.pnl,
+      pips: params.pips,
+    }).where(and(eq(trades.id, tradeId), eq(trades.status, 'open')))
 
-    if (result.count === 0) {
+    if (result.affectedRows === 0) {
       // Trade was already closed by another request — abort.
       return { alreadyClosed: true as const, trade: null, account: null }
     }
 
     // Fetch the updated trade + account in the same transaction.
-    const trade = await tx.trade.findUnique({ where: { id: tradeId } })
+    const trade = await tx.query.trades.findFirst({ where: eq(trades.id, tradeId) })
     const account = trade
-      ? await tx.account.findUnique({ where: { id: trade.accountId } })
+      ? await tx.query.accounts.findFirst({ where: eq(accounts.id, trade.accountId) })
       : null
 
     if (!trade) {
@@ -69,15 +65,12 @@ export async function atomicCloseTrade(
       const marginFreed = Math.max(0, trade.lotSize * 1000)
       const newMargin = Math.max(0, account.margin - marginFreed)
       const newFreeMargin = Number((newEquity - newMargin).toFixed(2))
-      const updated = await tx.account.update({
-        where: { id: account.id },
-        data: {
-          balance: newBalance,
-          equity: newEquity,
-          freeMargin: newFreeMargin,
-          margin: { decrement: marginFreed },
-        },
-      })
+      const updated = await tx.update(accounts).set({
+        balance: newBalance,
+        equity: newEquity,
+        freeMargin: newFreeMargin,
+        margin: newMargin,
+      }).where(eq(accounts.id, account.id)).returning().then(r => r[0])
       return { alreadyClosed: false as const, trade, account: updated }
     }
 
@@ -112,12 +105,12 @@ export async function atomicPartialCloseTrade(
   | { alreadyClosed: true; closedTrade: null; remainingTrade: null; account: null }
   | { alreadyClosed: false; closedTrade: Trade; remainingTrade: Trade | null; account: Account | null }
 > {
-  return db.$transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     // Lock the trade row by fetching it first (SQLite doesn't have SELECT FOR UPDATE,
     // but the transaction ensures consistency).
-    const trade = await tx.trade.findUnique({
-      where: { id: tradeId },
-      include: { account: true },
+    const trade = await tx.query.trades.findFirst({
+      where: eq(trades.id, tradeId),
+      with: { account: true },
     })
 
     if (!trade) {
@@ -134,71 +127,60 @@ export async function atomicPartialCloseTrade(
     }
 
     // 1. Create a closed trade record for the partial portion.
-    const closedTrade = await tx.trade.create({
-      data: {
-        accountId: trade.accountId,
-        symbol: trade.symbol,
-        side: trade.side,
-        lotSize: params.closeLot,
-        openPrice: trade.openPrice,
-        closePrice: params.closePrice,
-        stopLoss: trade.stopLoss,
-        takeProfit: trade.takeProfit,
-        trailingStop: false,
-        trailingPips: 0,
-        status: 'closed',
-        pnl: params.pnl,
-        pips: params.pips,
-        commission: params.commission,
-        swap: 0,
-        strategy: trade.strategy,
-        timeframe: trade.timeframe,
-        source: trade.source,
-        comment: `Partial close ${params.percent}% of ${trade.id.slice(-6)}`,
-        openTime: trade.openTime,
-        closeTime: new Date(),
-        mt5Ticket: trade.mt5Ticket,
-        mt5Server: trade.mt5Server,
-      },
-    })
+    const closedTrade = await tx.insert(trades).values({
+      accountId: trade.accountId,
+      symbol: trade.symbol,
+      side: trade.side,
+      lotSize: params.closeLot,
+      openPrice: trade.openPrice,
+      closePrice: params.closePrice,
+      stopLoss: trade.stopLoss,
+      takeProfit: trade.takeProfit,
+      trailingStop: false,
+      trailingPips: 0,
+      status: 'closed',
+      pnl: params.pnl,
+      pips: params.pips,
+      commission: params.commission,
+      swap: 0,
+      strategy: trade.strategy,
+      timeframe: trade.timeframe,
+      source: trade.source,
+      comment: `Partial close ${params.percent}% of ${trade.id.slice(-6)}`,
+      openTime: trade.openTime,
+      closeTime: new Date(),
+      mt5Ticket: trade.mt5Ticket,
+      mt5Server: trade.mt5Server,
+    }).returning().then(r => r[0])
 
     // 2. Either fully close OR reduce the original trade's lot size.
     let remainingTrade: Trade | null = null
     if (params.remainingLot < 0.01) {
       // Fully close — conditional update prevents double-close.
-      const result = await tx.trade.updateMany({
-        where: { id: tradeId, status: 'open' },
-        data: {
-          status: 'closed',
-          closePrice: params.closePrice,
-          closeTime: new Date(),
-          pnl: { increment: params.pnl },
-          pips: params.pips,
-        },
-      })
-      if (result.count === 0) {
+      const result = await tx.update(trades).set({
+        status: 'closed',
+        closePrice: params.closePrice,
+        closeTime: new Date(),
+        pnl: sql`${trades.pnl} + ${params.pnl}`,
+        pips: params.pips,
+      }).where(and(eq(trades.id, tradeId), eq(trades.status, 'open')))
+      if (result.affectedRows === 0) {
         throw new Error('Trade was closed by another request during partial close')
       }
-      remainingTrade = await tx.trade.findUnique({ where: { id: tradeId } })
+      remainingTrade = await tx.query.trades.findFirst({ where: eq(trades.id, tradeId) })
     } else {
       // Reduce lot size + decrement commission + free up margin for closed portion.
       const marginToFree = params.closeLot * 1000
-      remainingTrade = await tx.trade.update({
-        where: { id: tradeId },
-        data: {
-          lotSize: params.remainingLot,
-          commission: { decrement: params.commission },
-        },
-      })
+      remainingTrade = await tx.update(trades).set({
+        lotSize: params.remainingLot,
+        commission: sql`${trades.commission} - ${params.commission}`,
+      }).where(eq(trades.id, tradeId)).returning().then(r => r[0])
       // Free margin for the closed portion
       if (trade.account) {
-        await tx.account.update({
-          where: { id: trade.accountId },
-          data: {
-            margin: { decrement: marginToFree },
-            freeMargin: { increment: marginToFree },
-          },
-        })
+        await tx.update(accounts).set({
+          margin: sql`${accounts.margin} - ${marginToFree}`,
+          freeMargin: sql`${accounts.freeMargin} + ${marginToFree}`,
+        }).where(eq(accounts.id, trade.accountId))
       }
     }
 
@@ -209,14 +191,11 @@ export async function atomicPartialCloseTrade(
       const newEquity = Number(newBalance.toFixed(2))
       const remainingMargin = Math.max(0, (trade.account.margin || 0) - (params.closeLot * 1000))
       const newFreeMargin = Number((newEquity - remainingMargin).toFixed(2))
-      account = await tx.account.update({
-        where: { id: trade.accountId },
-        data: {
-          balance: newBalance,
-          equity: newEquity,
-          freeMargin: newFreeMargin,
-        },
-      })
+      account = await tx.update(accounts).set({
+        balance: newBalance,
+        equity: newEquity,
+        freeMargin: newFreeMargin,
+      }).where(eq(accounts.id, trade.accountId)).returning().then(r => r[0])
     }
 
     return {
@@ -234,11 +213,11 @@ export async function atomicPartialCloseTrade(
  * and allows for pre-deletion validation (e.g., check no open positions).
  */
 export async function atomicDeleteAccount(accountId: string): Promise<void> {
-  await db.$transaction(async (tx) => {
+  await db.transaction(async (tx) => {
     // Check for open trades — refuse to delete if any exist.
-    const openCount = await tx.trade.count({
-      where: { accountId, status: 'open' },
-    })
+    const openCount = await tx.select({ count: countAll }).from(trades)
+      .where(and(eq(trades.accountId, accountId), eq(trades.status, 'open')))
+      .then(r => r[0].count)
     if (openCount > 0) {
       throw new Error(
         `Cannot delete account with ${openCount} open position(s). Close all positions first.`,
@@ -246,11 +225,11 @@ export async function atomicDeleteAccount(accountId: string): Promise<void> {
     }
 
     // Delete orders first (they reference account)
-    await tx.order.deleteMany({ where: { accountId } })
+    await tx.delete(orders).where(eq(orders.accountId, accountId))
     // Delete trades
-    await tx.trade.deleteMany({ where: { accountId } })
+    await tx.delete(trades).where(eq(trades.accountId, accountId))
     // Delete account
-    await tx.account.delete({ where: { id: accountId } })
+    await tx.delete(accounts).where(eq(accounts.id, accountId))
 
     await logInfo('system', `Account ${accountId} deleted atomically (trades + orders + account)`)
   })

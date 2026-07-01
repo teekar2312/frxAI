@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, logs, accounts, trades, aiSignals, countAll, eq, gte, sql } from '@/lib/db'
 import { bridgeHealth } from '@/lib/mt5-client'
 
 export const dynamic = 'force-dynamic'
@@ -18,17 +18,17 @@ export async function GET() {
   // 1. Database check + latency + error count + log size
   try {
     const dbStart = Date.now()
-    await db.$queryRaw`SELECT 1`
+    await db.execute(sql`SELECT 1`)
     const dbLatencyMs = Date.now() - dbStart
 
     // Recent error count (last hour)
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
-    const recentErrors = await db.log.count({
-      where: { level: 'error', createdAt: { gte: oneHourAgo } },
-    })
+    const [recentErrorsRow] = await db.select({ count: countAll }).from(logs).where(and(eq(logs.level, 'error'), gte(logs.createdAt, oneHourAgo)))
+    const recentErrors = recentErrorsRow?.count ?? 0
 
     // Log table size
-    const logCount = await db.log.count()
+    const [logCountRow] = await db.select({ count: countAll }).from(logs)
+    const logCount = logCountRow?.count ?? 0
 
     checks.database = {
       status: 'ok',
@@ -36,8 +36,9 @@ export async function GET() {
       logCount,
       recentErrors,
     }
-  } catch (e: any) {
-    checks.database = { status: 'error', detail: e?.message }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.database = { status: 'error', detail: err?.message }
     allOk = false
   }
 
@@ -55,24 +56,28 @@ export async function GET() {
     }
     // Bridge offline is a warning, not a hard failure (app degrades to synthetic)
     if (!health.ok) allOk = false
-  } catch (e: any) {
-    checks.mt5Bridge = { status: 'error', detail: e?.message }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.mt5Bridge = { status: 'error', detail: err?.message }
     allOk = false
   }
 
   // 3. Count critical entities (lightweight queries)
   try {
-    const [accountCount, openTradeCount, signalCount] = await Promise.all([
-      db.account.count(),
-      db.trade.count({ where: { status: 'open' } }),
-      db.aiSignal.count(),
-    ])
+    const [acctRow] = await db.select({ count: countAll }).from(accounts)
+    const [tradeRow] = await db.select({ count: countAll }).from(trades).where(eq(trades.status, 'open'))
+    const [signalRow] = await db.select({ count: countAll }).from(aiSignals)
+    const accountCount = acctRow?.count ?? 0
+    const openTradeCount = tradeRow?.count ?? 0
+    const signalCount = signalRow?.count ?? 0
+
     checks.entities = {
       status: 'ok',
       detail: `${accountCount} accounts, ${openTradeCount} open trades, ${signalCount} AI signals`,
     }
-  } catch (e: any) {
-    checks.entities = { status: 'error', detail: e?.message }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.entities = { status: 'error', detail: err?.message }
     allOk = false
   }
 
@@ -100,8 +105,9 @@ export async function GET() {
       detail: pfRes.ok ? 'healthy' : `HTTP ${pfRes.status}`,
     }
     if (!pfRes.ok) allOk = false
-  } catch (e: any) {
-    checks.priceFeedService = { status: 'error', detail: e?.message || 'unreachable' }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.priceFeedService = { status: 'error', detail: err?.message || 'unreachable' }
     // Price feed offline is non-critical — app uses synthetic fallback
   }
 
@@ -116,8 +122,9 @@ export async function GET() {
       detail: bridgeMiniRes.ok ? 'healthy' : `HTTP ${bridgeMiniRes.status}`,
     }
     if (!bridgeMiniRes.ok) allOk = false
-  } catch (e: any) {
-    checks.mt5BridgeMiniService = { status: 'error', detail: e?.message || 'unreachable' }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.mt5BridgeMiniService = { status: 'error', detail: err?.message || 'unreachable' }
     // MT5-bridge mini-service offline means bridge commands go through HTTP fallback
   }
 
@@ -132,8 +139,9 @@ export async function GET() {
       detail: sltpRes.ok ? 'healthy' : `HTTP ${sltpRes.status}`,
     }
     if (!sltpRes.ok) allOk = false
-  } catch (e: any) {
-    checks.sltpMonitorService = { status: 'error', detail: e?.message || 'unreachable' }
+  } catch (e: unknown) {
+    const err = e as Error
+    checks.sltpMonitorService = { status: 'error', detail: err?.message || 'unreachable' }
     // SL/TP monitor offline means manual SL/TP monitoring only
   }
 

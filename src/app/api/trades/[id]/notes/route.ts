@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -30,15 +30,12 @@ export async function PATCH(
     if (!result.success) return result.error
     const comment = result.data.comment
 
-    const existing = await db.trade.findUnique({ where: { id } })
+    const existing = await db.query.trades.findFirst({ where: eq(trades.id, id) })
     if (!existing) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
     }
 
-    const trade = await db.trade.update({
-      where: { id },
-      data: { comment, updatedAt: new Date() },
-    })
+    const trade = await db.update(trades).set({ comment }).where(eq(trades.id, id)).returning().then(r => r[0]!)
 
     await logInfo(
       'mt5',

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, economicEvents, systemConfigs, notifications, eq, and, gte, lte, asc } from '@/lib/db'
 import { sendNotification, logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 
@@ -18,13 +18,14 @@ export async function POST() {
     const windowEnd = new Date(now.getTime() + 15 * 60000) // next 15 min
 
     // Find high-impact upcoming events in the next 15 min
-    const events = await db.economicEvent.findMany({
-      where: {
-        impact: 'high',
-        status: 'upcoming',
-        eventTime: { gte: now, lte: windowEnd },
-      },
-      orderBy: { eventTime: 'asc' },
+    const events = await db.query.economicEvents.findMany({
+      where: and(
+        eq(economicEvents.impact, 'high'),
+        eq(economicEvents.status, 'upcoming'),
+        gte(economicEvents.eventTime, now),
+        lte(economicEvents.eventTime, windowEnd),
+      ),
+      orderBy: asc(economicEvents.eventTime),
     })
 
     if (events.length === 0) {
@@ -32,17 +33,14 @@ export async function POST() {
     }
 
     // Get configured email recipient
-    const emailConfig = await db.systemConfig.findUnique({ where: { key: 'emailRecipient' } })
+    const emailConfig = await db.query.systemConfigs.findFirst({ where: eq(systemConfigs.key, 'emailRecipient') })
     const recipient = emailConfig?.value || 'trader@example.com'
 
     // Get existing notifications to dedup
-    const existingNotifs = await db.notification.findMany({
-      where: {
-        type: 'news',
-        createdAt: { gte: new Date(now.getTime() - 2 * 3600000) }, // last 2 hours
-      },
-      select: { subject: true },
-    })
+    const existingNotifs = await db.select({ subject: notifications.subject }).from(notifications).where(and(
+      eq(notifications.type, 'news'),
+      gte(notifications.createdAt, new Date(now.getTime() - 2 * 3600000)),
+    ))
     const existingSubjects = new Set(existingNotifs.map((n) => n.subject))
 
     for (const event of events) {

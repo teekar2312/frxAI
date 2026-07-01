@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { logInfo, sendNotification } from '@/lib/logger'
 import { SYMBOL_BASE } from '@/lib/types'
 import { apiCatch } from '@/lib/api-handler'
@@ -34,7 +34,7 @@ export async function POST(
     }
     const bufferPips = validated.data.bufferPips
 
-    const trade = await db.trade.findUnique({ where: { id }, include: { account: true } })
+    const trade = await db.query.trades.findFirst({ where: eq(trades.id, id), with: { account: true } })
     if (!trade) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
     }
@@ -68,10 +68,7 @@ export async function POST(
       }, { status: 400 })
     }
 
-    const updated = await db.trade.update({
-      where: { id },
-      data: { stopLoss: newSl, updatedAt: new Date() },
-    })
+    const updated = await db.update(trades).set({ stopLoss: newSl }).where(eq(trades.id, id)).returning().then(r => r[0]!)
 
     await logInfo(
       'mt5',

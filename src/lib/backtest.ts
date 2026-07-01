@@ -1,5 +1,5 @@
 import 'server-only'
-import { db } from './db'
+import { db, backtests, logs } from './db'
 import { priceAt, calcPnl } from './market'
 import { getBars, bridgeHealth, type MT5Timeframe } from './mt5-client'
 
@@ -426,36 +426,32 @@ export async function runBacktest(input: BacktestInput) {
   const std = Math.sqrt(variance)
   const sharpe = std > 0 ? (mean / std) * Math.sqrt(252 * 24 * 12) : 0
 
-  const created = await db.backtest.create({
-    data: {
-      name: `${input.name} [${dataSource}]`,
-      symbol: input.symbol,
-      timeframe: input.timeframe,
-      strategy: input.strategy,
-      periodFrom: input.periodFrom,
-      periodTo: input.periodTo,
-      initialCapital: input.initialCapital,
-      finalCapital: Number(capital.toFixed(2)),
-      totalTrades,
-      winTrades: wins,
-      lossTrades: losses,
-      winRate: Number(winRate.toFixed(2)),
-      profitFactor: Number(profitFactor.toFixed(2)),
-      maxDrawdown: Number((maxDD * 100).toFixed(2)),
-      sharpeRatio: Number(sharpe.toFixed(2)),
-      netProfit: Number(netProfit.toFixed(2)),
-      equityCurve: JSON.stringify(equityCurve),
-      tradesJson: JSON.stringify(trades),
-      status: 'completed',
-    },
-  })
+  const created = await db.insert(backtests).values({
+    name: `${input.name} [${dataSource}]`,
+    symbol: input.symbol,
+    timeframe: input.timeframe,
+    strategy: input.strategy,
+    periodFrom: input.periodFrom,
+    periodTo: input.periodTo,
+    initialCapital: input.initialCapital,
+    finalCapital: Number(capital.toFixed(2)),
+    totalTrades,
+    winTrades: wins,
+    lossTrades: losses,
+    winRate: Number(winRate.toFixed(2)),
+    profitFactor: Number(profitFactor.toFixed(2)),
+    maxDrawdown: Number((maxDD * 100).toFixed(2)),
+    sharpeRatio: Number(sharpe.toFixed(2)),
+    netProfit: Number(netProfit.toFixed(2)),
+    equityCurve: JSON.stringify(equityCurve),
+    tradesJson: JSON.stringify(trades),
+    status: 'completed',
+  }).returning().then(r => r[0])
 
-  await db.log.create({
-    data: {
-      level: 'info',
-      source: 'backtest',
-      message: `Backtest "${input.name}" [${dataSource}] ${input.symbol} ${input.timeframe} [${engine}]: ${totalTrades} trades, win ${winRate.toFixed(1)}%, PF ${profitFactor.toFixed(2)}, net ${netProfit.toFixed(2)}`,
-    },
+  await db.insert(logs).values({
+    level: 'info',
+    source: 'backtest',
+    message: `Backtest "${input.name}" [${dataSource}] ${input.symbol} ${input.timeframe} [${engine}]: ${totalTrades} trades, win ${winRate.toFixed(1)}%, PF ${profitFactor.toFixed(2)}, net ${netProfit.toFixed(2)}`,
   })
 
   return created

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { connectMT5, disconnectMT5 } from '@/lib/mt5-client'
-import { db } from '@/lib/db'
+import { db, accounts, eq } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -34,21 +34,18 @@ export async function POST(req: NextRequest) {
 
     // Persist MT5 login + server on the Account record (if provided)
     if (accountId) {
-      await db.account.update({
-        where: { id: accountId },
-        data: {
-          login: String(login),
-          server,
-          // Mark as connected + sync balance from MT5
-          connected: true,
-          balance: account.balance,
-          equity: account.equity,
-          freeMargin: account.freeMargin,
-          margin: account.margin,
-          marginLevel: account.marginLevel,
-          leverage: account.leverage.toString().replace(/^1:/, ''),
-        },
-      })
+      await db.update(accounts).set({
+        login: String(login),
+        server,
+        // Mark as connected + sync balance from MT5
+        connected: true,
+        balance: account.balance,
+        equity: account.equity,
+        freeMargin: account.freeMargin,
+        margin: account.margin,
+        marginLevel: account.marginLevel,
+        leverage: account.leverage.toString().replace(/^1:/, ''),
+      }).where(eq(accounts.id, accountId))
     }
 
     await logInfo('mt5', `MT5 connected: login=${login} server=${server} balance=${account.balance}`, {

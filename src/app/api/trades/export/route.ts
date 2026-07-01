@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq, and, desc } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
@@ -12,13 +12,13 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || 'closed'
     const accountId = searchParams.get('accountId') || undefined
 
-    const where: any = { status }
-    if (accountId) where.accountId = accountId
+    const conditions = [eq(trades.status, status)]
+    if (accountId) conditions.push(eq(trades.accountId, accountId))
 
-    const trades = await db.trade.findMany({
-      where,
-      orderBy: { openTime: 'desc' },
-      take: 1000,
+    const tradesList = await db.query.trades.findMany({
+      where: and(...conditions),
+      orderBy: desc(trades.openTime),
+      limit: 1000,
     })
 
     const header = [
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       'DurationMin',
     ]
 
-    const rows = trades.map((t) => {
+    const rows = tradesList.map((t) => {
       const open = new Date(t.openTime)
       const close = t.closeTime ? new Date(t.closeTime) : null
       const durationMin = close ? Math.round((close.getTime() - open.getTime()) / 60000) : ''

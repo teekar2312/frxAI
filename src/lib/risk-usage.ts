@@ -1,5 +1,6 @@
 import 'server-only'
-import { db } from './db'
+import { db, eq, gte, lte, and } from './db'
+import { accounts, riskSettings, trades } from './db'
 import { calcPnl } from './market'
 import type { RiskUsage } from './types'
 
@@ -12,8 +13,8 @@ import type { RiskUsage } from './types'
  */
 export async function computeRiskUsage(): Promise<RiskUsage> {
   const account =
-    (await db.account.findFirst({ where: { isDefault: true } })) ||
-    (await db.account.findFirst())
+    (await db.select().from(accounts).where(eq(accounts.isDefault, true)).limit(1).then(r => r[0] ?? null)) ||
+    (await db.select().from(accounts).limit(1).then(r => r[0] ?? null))
 
   if (!account) {
     return {
@@ -28,16 +29,16 @@ export async function computeRiskUsage(): Promise<RiskUsage> {
     }
   }
 
-  const settings = await db.riskSetting.findMany()
+  const settings = await db.select().from(riskSettings)
   const cfg: Record<string, string> = {}
   for (const s of settings) cfg[s.key] = s.value
 
   const dailyRiskLimitPct = parseFloat(cfg.dailyRiskLimitPct ?? '2')
   const maxOpenPositions = parseInt(cfg.maxOpenPositions ?? '10', 10)
 
-  const openTrades = await db.trade.findMany({
-    where: { accountId: account.id, status: 'open' },
-  })
+  const openTrades = await db.select().from(trades).where(
+    and(eq(trades.accountId, account.id), eq(trades.status, 'open')),
+  )
 
   let openRisk = 0
   for (const t of openTrades) {
@@ -64,13 +65,14 @@ export async function computeRiskUsage(): Promise<RiskUsage> {
   const utcEnd = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999),
   )
-  const todayClosed = await db.trade.findMany({
-    where: {
-      accountId: account.id,
-      status: 'closed',
-      closeTime: { gte: utcStart, lte: utcEnd },
-    },
-  })
+  const todayClosed = await db.select().from(trades).where(
+    and(
+      eq(trades.accountId, account.id),
+      eq(trades.status, 'closed'),
+      gte(trades.closeTime, utcStart),
+      lte(trades.closeTime, utcEnd),
+    ),
+  )
   const dailyPnl = todayClosed.reduce((sum, t) => sum + (t.pnl || 0), 0)
   const dailyPnlPct = balance > 0 ? (dailyPnl / balance) * 100 : 0
 

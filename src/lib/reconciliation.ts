@@ -15,7 +15,8 @@
 //   4. Return reconciliation report
 
 import 'server-only'
-import { db } from './db'
+import { db, eq, and, ne, isNotNull } from './db'
+import { trades, accounts } from './db'
 import { getPositions, bridgeHealth, type MT5Position } from './mt5-client'
 import { bidAsk, calcPnl } from './market'
 import { atomicCloseTrade } from './db-transactions'
@@ -63,9 +64,9 @@ export async function reconcileAccountPositions(
   }
 
   // 2. Fetch local open trades with mt5Ticket
-  const localTrades = await db.trade.findMany({
-    where: { accountId, status: 'open', mt5Ticket: { not: null } },
-  })
+  const localTrades = await db.select().from(trades).where(
+    and(eq(trades.accountId, accountId), eq(trades.status, 'open'), isNotNull(trades.mt5Ticket)),
+  )
   report.checked = localTrades.length
 
   if (localTrades.length === 0) {
@@ -204,11 +205,9 @@ export async function reconcileAllAccounts(): Promise<ReconciliationReport> {
 
   try {
     // Get all accounts with a login number
-    const accounts = await db.account.findMany({
-      where: { login: { not: '' } },
-    })
+    const accountRows = await db.select().from(accounts).where(ne(accounts.login, ''))
 
-    for (const account of accounts) {
+    for (const account of accountRows) {
       const mt5Login = Number(account.login)
       if (!mt5Login || mt5Login <= 0) continue
 

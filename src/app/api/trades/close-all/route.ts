@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, accounts, eq, and, asc } from '@/lib/db'
 import { bidAsk, calcPnl } from '@/lib/market'
 import { logInfo } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
@@ -45,20 +45,20 @@ export async function POST(req: NextRequest) {
     const reason = parsed.data.reason || 'manual-close-all'
 
     // Resolve account
-    let account = null
+    let account: any = null
     if (parsed.data.accountId) {
-      account = await db.account.findUnique({ where: { id: parsed.data.accountId } })
+      account = await db.query.accounts.findFirst({ where: eq(accounts.id, parsed.data.accountId) }) || null
     } else {
-      account = await db.account.findFirst({ where: { isDefault: true } })
+      account = await db.query.accounts.findFirst({ where: eq(accounts.isDefault, true) }) || null
     }
     if (!account) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
     // Fetch all open trades for this account
-    const openTrades = await db.trade.findMany({
-      where: { accountId: account.id, status: 'open' },
-      orderBy: { openTime: 'asc' }, // close oldest first
+    const openTrades = await db.query.trades.findMany({
+      where: and(eq(trades.accountId, account.id), eq(trades.status, 'open')),
+      orderBy: asc(trades.openTime), // close oldest first
     })
 
     if (openTrades.length === 0) {

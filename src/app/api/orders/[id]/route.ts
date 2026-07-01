@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, orders, eq } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { requireTrader } from '@/lib/auth-server'
 import { apiCatch } from '@/lib/api-handler'
@@ -21,12 +21,12 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    const order = await db.order.findUnique({ where: { id } })
+    const order = await db.query.orders.findFirst({ where: eq(orders.id, id) })
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     }
 
-    await db.order.update({ where: { id }, data: { status: 'cancelled' } })
+    await db.update(orders).set({ status: 'cancelled' }).where(eq(orders.id, id))
     await audit({ action: 'order.cancel', resource: id, resourceType: 'order', actor: user.email, details: { symbol: order.symbol, side: order.side, lotSize: order.lotSize, price: order.price } })
     await logInfo('mt5', `Order cancelled: ${order.side} ${order.lotSize} ${order.symbol} @ ${order.price}`, {
       orderId: id,

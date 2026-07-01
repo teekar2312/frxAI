@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, accounts, asc, eq } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { accountCreateSchema, validateBody } from '@/lib/validations'
 import { apiCatch } from '@/lib/api-handler'
@@ -11,8 +11,8 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const accounts = await db.account.findMany({ orderBy: { createdAt: 'asc' } })
-    return NextResponse.json({ accounts })
+    const accountsList = await db.query.accounts.findMany({ orderBy: asc(accounts.createdAt) })
+    return NextResponse.json({ accounts: accountsList })
   } catch (e) {
     return apiCatch(e, 'accounts', 'GET', req)
   }
@@ -35,28 +35,26 @@ export async function POST(req: NextRequest) {
 
     // If default, unset others first
     if (isDefault) {
-      await db.account.updateMany({ where: { isDefault: true }, data: { isDefault: false } })
+      await db.update(accounts).set({ isDefault: false }).where(eq(accounts.isDefault, true))
     }
 
     const initialBalance = Number(balance ?? 10000)
-    const account = await db.account.create({
-      data: {
-        name: String(name),
-        broker: broker ? String(broker) : 'FINEX Indonesia',
-        server: server ? String(server) : '',
-        login: String(login),
-        accountType: accountType ? String(accountType) : 'demo',
-        currency: currency ? String(currency) : 'USD',
-        leverage: leverage ? String(leverage) : '1:100',
-        balance: initialBalance,
-        equity: initialBalance,
-        margin: 0,
-        freeMargin: initialBalance,
-        marginLevel: 0,
-        connected: false,
-        isDefault: Boolean(isDefault ?? false),
-      },
-    })
+    const account = await db.insert(accounts).values({
+      name: String(name),
+      broker: broker ? String(broker) : 'FINEX Indonesia',
+      server: server ? String(server) : '',
+      login: String(login),
+      accountType: accountType ? String(accountType) : 'demo',
+      currency: currency ? String(currency) : 'USD',
+      leverage: leverage ? String(leverage) : '1:100',
+      balance: initialBalance,
+      equity: initialBalance,
+      margin: 0,
+      freeMargin: initialBalance,
+      marginLevel: 0,
+      connected: false,
+      isDefault: Boolean(isDefault ?? false),
+    }).returning().then(r => r[0]!)
 
     await logInfo('api', `Account created: ${account.name} (${account.login})`, {
       accountId: account.id,

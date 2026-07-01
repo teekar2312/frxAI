@@ -1,5 +1,5 @@
 import 'server-only'
-import { db } from './db'
+import { db, aiSignals, logs } from './db'
 import type { AiSignal } from './types'
 import { checkNewsAvoidance } from './news-avoidance'
 import { priceAt } from './market'
@@ -145,29 +145,25 @@ Respond ONLY with a compact JSON object (no markdown, no commentary):
   // Capture price at signal time for later outcome evaluation
   const currentPriceAtSignal = priceAt(symbol, Date.now())
 
-  const created = await db.aiSignal.create({
-    data: {
-      symbol,
-      direction: parsed.direction ?? 'neutral',
-      confidence: finalConfidence,
-      timeframe,
-      reasoning: finalReasoning,
-      selectedIndicators: JSON.stringify(parsed.selectedIndicators ?? enabledIndicators.slice(0, 5)),
-      factors: JSON.stringify(parsed.factors ?? {}),
-      action: finalAction,
-      modelVersion: `fx-scalper-v1-${timeframe.toLowerCase()}`,
-      accuracy: realAccuracy,
-      priceAtSignal: currentPriceAtSignal,
-    },
-  })
+  const created = await db.insert(aiSignals).values({
+    symbol,
+    direction: parsed.direction ?? 'neutral',
+    confidence: finalConfidence,
+    timeframe,
+    reasoning: finalReasoning,
+    selectedIndicators: JSON.stringify(parsed.selectedIndicators ?? enabledIndicators.slice(0, 5)),
+    factors: JSON.stringify(parsed.factors ?? {}),
+    action: finalAction,
+    modelVersion: `fx-scalper-v1-${timeframe.toLowerCase()}`,
+    accuracy: realAccuracy,
+    priceAtSignal: currentPriceAtSignal,
+  }).returning().then(r => r[0])
 
-  await db.log.create({
-    data: {
-      level: newsAvoid.action === 'wait' ? 'warn' : 'info',
-      source: 'ai',
-      message: `AI signal generated: ${symbol} ${parsed.direction} @ ${finalConfidence}% (action: ${finalAction})${newsAvoid.hasUpcomingHighImpact ? ' [news-avoidance applied]' : ''}`,
-      context: JSON.stringify({ factors: parsed.factors, newsAvoidance: { action: newsAvoid.action, penalty: newsAvoid.confidencePenalty, event: newsAvoid.eventTitle, minsUntil: newsAvoid.minutesUntilEvent } }),
-    },
+  await db.insert(logs).values({
+    level: newsAvoid.action === 'wait' ? 'warn' : 'info',
+    source: 'ai',
+    message: `AI signal generated: ${symbol} ${parsed.direction} @ ${finalConfidence}% (action: ${finalAction})${newsAvoid.hasUpcomingHighImpact ? ' [news-avoidance applied]' : ''}`,
+    context: JSON.stringify({ factors: parsed.factors, newsAvoidance: { action: newsAvoid.action, penalty: newsAvoid.confidencePenalty, event: newsAvoid.eventTitle, minsUntil: newsAvoid.minutesUntilEvent } }),
   })
 
   return created as unknown as AiSignal

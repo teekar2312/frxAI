@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { bidAsk, calcPnl } from '@/lib/market'
 import { logInfo, sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
@@ -43,7 +43,7 @@ export async function POST(
     }
     const percent = validated.data.percent
 
-    const trade = await db.trade.findUnique({ where: { id }, include: { account: true } })
+    const trade = await db.query.trades.findFirst({ where: eq(trades.id, id), with: { account: true } })
     if (!trade) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
     }

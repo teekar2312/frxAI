@@ -12,7 +12,7 @@
 //   - No external dependency (works offline)
 
 import 'server-only'
-import { db } from './db'
+import { db, logs, eq, and, inArray, gte, desc, countAll } from './db'
 import { logInfo } from './logger'
 import { sendWebhook } from './webhook'
 
@@ -37,21 +37,19 @@ export interface CapturedError {
 export async function captureError(error: CapturedError): Promise<void> {
   try {
     // 1. Always log to DB
-    await db.log.create({
-      data: {
-        level: error.severity === 'critical' || error.severity === 'high' ? 'error' : 'warn',
-        source: error.source,
-        message: error.message,
-        stack: error.stack || null,
-        context: JSON.stringify({
-          severity: error.severity,
-          userId: error.userId,
-          requestId: error.requestId,
-          url: error.url,
-          method: error.method,
-          ...error.context,
-        }),
-      },
+    await db.insert(logs).values({
+      level: error.severity === 'critical' || error.severity === 'high' ? 'error' : 'warn',
+      source: error.source,
+      message: error.message,
+      stack: error.stack || null,
+      context: JSON.stringify({
+        severity: error.severity,
+        userId: error.userId,
+        requestId: error.requestId,
+        url: error.url,
+        method: error.method,
+        ...error.context,
+      }),
     })
 
     // 2. Send webhook for high/critical errors (best-effort)
@@ -131,13 +129,10 @@ export async function getErrorStats(hoursBack = 24): Promise<{
 }> {
   const since = new Date(Date.now() - hoursBack * 60 * 60 * 1000)
 
-  const errors = await db.log.findMany({
-    where: {
-      level: { in: ['error', 'warn'] },
-      createdAt: { gte: since },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
+  const errors = await db.query.logs.findMany({
+    where: and(inArray(logs.level, ['error', 'warn']), gte(logs.createdAt, since)),
+    orderBy: desc(logs.createdAt),
+    limit: 100,
   })
 
   const bySeverity: Record<ErrorSeverity, number> = {
@@ -188,12 +183,9 @@ export async function checkErrorRateSpike(
   windowMinutes = 5,
 ): Promise<{ spiked: boolean; count: number; threshold: number }> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000)
-  const count = await db.log.count({
-    where: {
-      level: 'error',
-      createdAt: { gte: since },
-    },
-  })
+  const count = await db.select({ count: countAll }).from(logs)
+    .where(and(eq(logs.level, 'error'), gte(logs.createdAt, since)))
+    .then(r => r[0].count)
 
   if (count >= threshold) {
     await logInfo('system', `Error rate spike detected: ${count} errors in ${windowMinutes} min (threshold: ${threshold})`)

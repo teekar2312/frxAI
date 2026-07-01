@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, trades, accounts, eq, and, desc, sql } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
@@ -23,18 +23,18 @@ export async function GET(req: NextRequest) {
     const symbol = searchParams.get('symbol')
     const limit = Number(searchParams.get('limit') ?? 100)
 
-    const where: Record<string, unknown> = {}
-    if (status) where.status = status
-    if (accountId) where.accountId = accountId
-    if (symbol) where.symbol = symbol
+    const conditions = []
+    if (status) conditions.push(eq(trades.status, status))
+    if (accountId) conditions.push(eq(trades.accountId, accountId))
+    if (symbol) conditions.push(eq(trades.symbol, symbol))
 
-    const trades = await db.trade.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: Math.min(Math.max(limit, 1), 500),
+    const tradesList = await db.query.trades.findMany({
+      where: conditions.length > 0 ? and(...conditions) : undefined,
+      orderBy: desc(trades.createdAt),
+      limit: Math.min(Math.max(limit, 1), 500),
     })
 
-    return NextResponse.json({ trades })
+    return NextResponse.json({ trades: tradesList })
   } catch (e) {
     return apiCatch(e, 'trades', 'GET', req)
   }
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     }
     const { accountId, symbol, side, lotSize, stopLoss, takeProfit, source, trailingStop, trailingPips, comment } = validated.data
 
-    const account = await db.account.findUnique({ where: { id: accountId } })
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.id, accountId) }) || null
     if (!account) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
@@ -164,39 +164,35 @@ export async function POST(req: NextRequest) {
     const commission = Number((lot * 2.5 * 2).toFixed(2))
 
     // Create trade + update margin atomically
-    const [trade] = await db.$transaction([
-      db.trade.create({
-        data: {
-          accountId,
-          symbol,
-          side,
-          lotSize: lot,
-          openPrice,
-          closePrice: null,
-          stopLoss: sl,
-          takeProfit: tp,
-          trailingStop: Boolean(trailingStop ?? false),
-          trailingPips: trailingPips != null ? Number(trailingPips) : 0,
-          status: 'open',
-          pnl: 0,
-          pips: 0,
-          commission,
-          swap: 0,
-          strategy: 'scalping-m5',
-          timeframe: 'M5',
-          source: source ? String(source) : 'manual',
-          comment: comment ? String(comment) : null,
-          mt5Ticket,
-          mt5Server,
-          openTime: new Date(),
-          closeTime: null,
-        },
-      }),
-      db.account.update({
-        where: { id: accountId },
-        data: { margin: { increment: lot * 1000 } },
-      }),
-    ])
+    const trade = await db.transaction(async (tx) => {
+      const [t] = await tx.insert(trades).values({
+        accountId,
+        symbol,
+        side,
+        lotSize: lot,
+        openPrice,
+        closePrice: null,
+        stopLoss: sl,
+        takeProfit: tp,
+        trailingStop: Boolean(trailingStop ?? false),
+        trailingPips: trailingPips != null ? Number(trailingPips) : 0,
+        status: 'open',
+        pnl: 0,
+        pips: 0,
+        commission,
+        swap: 0,
+        strategy: 'scalping-m5',
+        timeframe: 'M5',
+        source: source ? String(source) : 'manual',
+        comment: comment ? String(comment) : null,
+        mt5Ticket,
+        mt5Server,
+        openTime: new Date(),
+        closeTime: null,
+      }).returning()
+      await tx.update(accounts).set({ margin: sql`${accounts.margin} + ${lot * 1000}` }).where(eq(accounts.id, accountId))
+      return t!
+    })
 
     await logInfo(
       'mt5',

@@ -2,7 +2,7 @@
 // Used by the NextAuth credentials provider and the user management API.
 
 import bcrypt from 'bcryptjs'
-import { db } from './db'
+import { db, users, eq, asc } from './db'
 
 const BCRYPT_ROUNDS = 10
 
@@ -46,16 +46,13 @@ export async function verifyPassword(plaintext: string, hash: string): Promise<b
  */
 export async function authenticateUser(email: string, password: string): Promise<SafeUser | null> {
   try {
-    const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } })
+    const user = await db.query.users.findFirst({ where: eq(users.email, email.toLowerCase().trim()) })
     if (!user) return null
     if (!user.active) return null
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) return null
     // Update lastLoginAt
-    await db.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-    })
+    await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id))
     return toSafeUser(user)
   } catch (e) {
     console.error('authenticateUser error:', e)
@@ -71,27 +68,25 @@ export async function createUser(params: {
   role?: UserRole
 }): Promise<SafeUser> {
   const email = params.email.toLowerCase().trim()
-  const existing = await db.user.findUnique({ where: { email } })
+  const existing = await db.query.users.findFirst({ where: eq(users.email, email) })
   if (existing) {
     throw new Error(`User with email ${email} already exists`)
   }
   const passwordHash = await hashPassword(params.password)
-  const user = await db.user.create({
-    data: {
-      email,
-      name: params.name.trim(),
-      passwordHash,
-      role: params.role || 'trader',
-      active: true,
-    },
-  })
+  const user = await db.insert(users).values({
+    email,
+    name: params.name.trim(),
+    passwordHash,
+    role: params.role || 'trader',
+    active: true,
+  }).returning().then(r => r[0])
   return toSafeUser(user)
 }
 
 /** List all users (without password hashes). */
 export async function listUsers(): Promise<SafeUser[]> {
-  const users = await db.user.findMany({ orderBy: { createdAt: 'asc' } })
-  return users.map(toSafeUser)
+  const userList = await db.query.users.findMany({ orderBy: asc(users.createdAt) })
+  return userList.map(toSafeUser)
 }
 
 /** Update user role or active status. */
@@ -103,19 +98,19 @@ export async function updateUser(
   if (params.role) data.role = params.role
   if (params.active !== undefined) data.active = params.active
   if (params.name) data.name = params.name.trim()
-  const user = await db.user.update({ where: { id }, data })
+  const user = await db.update(users).set(data).where(eq(users.id, id)).returning().then(r => r[0])
   return toSafeUser(user)
 }
 
 /** Reset a user's password. */
 export async function resetUserPassword(id: string, newPassword: string): Promise<void> {
   const passwordHash = await hashPassword(newPassword)
-  await db.user.update({ where: { id }, data: { passwordHash } })
+  await db.update(users).set({ passwordHash }).where(eq(users.id, id))
 }
 
 /** Delete a user. */
 export async function deleteUser(id: string): Promise<void> {
-  await db.user.delete({ where: { id } })
+  await db.delete(users).where(eq(users.id, id))
 }
 
 /**

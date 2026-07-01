@@ -34,16 +34,8 @@ yarn-error.log*
 .env*
 !.env.example
 
-# database files (environment-specific, do not commit)
-db/*.db
-db/*.db-journal
-db/*.db-wal
-db/*.db-shm
-db/backups/*.db
+# database backup files (environment-specific, do not commit)
 db/backups/*.sql
-
-# Prisma generated client (output = src/generated/prisma)
-src/generated/
 
 # vercel
 .vercel
@@ -87,6 +79,3 @@ Thumbs.db
 
 # Mini-services node_modules
 mini-services/*/node_modules/
-
-# Prisma query engine binary
-*.node

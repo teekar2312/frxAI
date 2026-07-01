@@ -7,7 +7,8 @@
 // If any check fails, the trade is rejected with a 422 + reason.
 
 import 'server-only'
-import { db } from './db'
+import { db, eq, and, gte, lte } from './db'
+import { riskSettings, accounts, trades, orders } from './db'
 import { calcPnl, bidAsk } from './market'
 import { SYMBOL_BASE } from './types'
 import { logInfo } from './logger'
@@ -35,7 +36,7 @@ const DEFAULTS: RiskConfig = {
 /** Load risk config from the RiskSetting table. Falls back to defaults. */
 export async function getRiskConfig(): Promise<RiskConfig> {
   try {
-    const rows = await db.riskSetting.findMany()
+    const rows = await db.select().from(riskSettings)
     const map: Record<string, string> = {}
     for (const r of rows) map[r.key] = r.value
     return {
@@ -119,7 +120,7 @@ export async function enforceTradeOpen(params: {
   }
 
   // ── Fetch account ──────────────────────────────────────────────────────────
-  const account = await db.account.findUnique({ where: { id: params.accountId } })
+  const account = await db.select().from(accounts).where(eq(accounts.id, params.accountId)).limit(1).then(r => r[0] ?? null)
   if (!account) {
     return {
       allowed: false,
@@ -138,20 +139,25 @@ export async function enforceTradeOpen(params: {
   }
 
   // ── Fetch open trades + pending orders + today's closed trades ─────────────────
-  const openTrades = await db.trade.findMany({
-    where: { accountId: params.accountId, status: 'open' },
-  })
+  const openTrades = await db.select().from(trades).where(
+    and(eq(trades.accountId, params.accountId), eq(trades.status, 'open')),
+  )
 
-  const pendingOrders = await db.order.findMany({
-    where: { accountId: params.accountId, status: 'pending' },
-  })
+  const pendingOrders = await db.select().from(orders).where(
+    and(eq(orders.accountId, params.accountId), eq(orders.status, 'pending')),
+  )
 
   const now = new Date()
   const utcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0))
   const utcEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999))
-  const todayClosed = await db.trade.findMany({
-    where: { accountId: params.accountId, status: 'closed', closeTime: { gte: utcStart, lte: utcEnd } },
-  })
+  const todayClosed = await db.select().from(trades).where(
+    and(
+      eq(trades.accountId, params.accountId),
+      eq(trades.status, 'closed'),
+      gte(trades.closeTime, utcStart),
+      lte(trades.closeTime, utcEnd),
+    ),
+  )
 
   // ── Compute context values ────────────────────────────────────────────────
   const openPositions = openTrades.length
@@ -286,15 +292,20 @@ export async function isDailyLossCircuitBreakerActive(accountId: string): Promis
   dailyRiskLimitPct: number
 }> {
   const cfg = await getRiskConfig()
-  const account = await db.account.findUnique({ where: { id: accountId } })
+  const account = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1).then(r => r[0] ?? null)
   if (!account) return { active: false, dailyPnlPct: 0, dailyRiskLimitPct: cfg.dailyRiskLimitPct }
 
   const now = new Date()
   const utcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0))
   const utcEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999))
-  const todayClosed = await db.trade.findMany({
-    where: { accountId, status: 'closed', closeTime: { gte: utcStart, lte: utcEnd } },
-  })
+  const todayClosed = await db.select().from(trades).where(
+    and(
+      eq(trades.accountId, accountId),
+      eq(trades.status, 'closed'),
+      gte(trades.closeTime, utcStart),
+      lte(trades.closeTime, utcEnd),
+    ),
+  )
   const dailyPnl = todayClosed.reduce((s, t) => s + (t.pnl || 0), 0)
   const balance = account.balance || 0
   const dailyPnlPct = balance > 0 ? (dailyPnl / balance) * 100 : 0

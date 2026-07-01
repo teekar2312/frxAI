@@ -15,7 +15,8 @@
 //   4. computeRealAccuracy() aggregates outcomes → real accuracy %
 
 import 'server-only'
-import { db } from './db'
+import { db, eq, and, desc, lt, inArray, isNotNull, not, exists, sql } from './db'
+import { aiSignals, aiSignalOutcomes } from './db'
 import { priceAt, bidAsk } from './market'
 import { SYMBOL_BASE } from './types'
 import { logInfo } from './logger'
@@ -43,7 +44,7 @@ export async function evaluateSignalOutcome(signalId: string): Promise<{
   pipsMoved: number
   reason?: string
 } | null> {
-  const signal = await db.aiSignal.findUnique({ where: { id: signalId } })
+  const signal = await db.select().from(aiSignals).where(eq(aiSignals.id, signalId)).limit(1).then(r => r[0] ?? null)
   if (!signal) return null
 
   // Skip neutral/wait signals — no directional prediction to validate
@@ -52,7 +53,7 @@ export async function evaluateSignalOutcome(signalId: string): Promise<{
   }
 
   // Check if already evaluated
-  const existing = await db.aiSignalOutcome.findUnique({ where: { signalId } })
+  const existing = await db.select().from(aiSignalOutcomes).where(eq(aiSignalOutcomes.signalId, signalId)).limit(1).then(r => r[0] ?? null)
   if (existing && existing.correct !== null) {
     return {
       evaluated: true,
@@ -97,24 +98,22 @@ export async function evaluateSignalOutcome(signalId: string): Promise<{
     correct = pipsMoved < -PIP_THRESHOLD
   }
 
-  // Create or update the outcome record
-  await db.aiSignalOutcome.upsert({
-    where: { signalId },
-    create: {
-      signalId,
-      symbol: signal.symbol,
-      direction: signal.direction,
-      action: signal.action,
-      confidence: signal.confidence,
-      priceAtSignal,
-      priceAtEval: currentPrice,
-      priceChange: Number(priceChange.toFixed(base.digits + 2)),
-      priceChangePct: Number(priceChangePct.toFixed(4)),
-      pipsMoved: Number(pipsMoved.toFixed(1)),
-      correct,
-      evaluatedAt: new Date(),
-    },
-    update: {
+  // Create or update the outcome record (MySQL onDuplicateKeyUpdate)
+  await db.insert(aiSignalOutcomes).values({
+    signalId,
+    symbol: signal.symbol,
+    direction: signal.direction,
+    action: signal.action,
+    confidence: signal.confidence,
+    priceAtSignal,
+    priceAtEval: currentPrice,
+    priceChange: Number(priceChange.toFixed(base.digits + 2)),
+    priceChangePct: Number(priceChangePct.toFixed(4)),
+    pipsMoved: Number(pipsMoved.toFixed(1)),
+    correct,
+    evaluatedAt: new Date(),
+  }).onDuplicateKeyUpdate({
+    set: {
       priceAtEval: currentPrice,
       priceChange: Number(priceChange.toFixed(base.digits + 2)),
       priceChangePct: Number(priceChangePct.toFixed(4)),
@@ -149,15 +148,13 @@ export async function computeRealAccuracy(symbol: string, lookback = 50): Promis
   avgPipsMoved: number
   lastEvaluatedAt: Date | null
 }> {
-  const outcomes = await db.aiSignalOutcome.findMany({
-    where: {
-      symbol,
-      correct: { not: null },
-      evaluatedAt: { not: null },
-    },
-    orderBy: { evaluatedAt: 'desc' },
-    take: lookback,
-  })
+  const outcomes = await db.select().from(aiSignalOutcomes).where(
+    and(
+      eq(aiSignalOutcomes.symbol, symbol),
+      isNotNull(aiSignalOutcomes.correct),
+      isNotNull(aiSignalOutcomes.evaluatedAt),
+    ),
+  ).orderBy(desc(aiSignalOutcomes.evaluatedAt)).limit(lookback)
 
   if (outcomes.length === 0) {
     return {
@@ -293,14 +290,15 @@ export async function evaluatePendingSignals(): Promise<{
   // 3. Are older than 30 minutes (default M5 hold period)
   const cutoff = new Date(Date.now() - 30 * 60 * 1000)
 
-  const pendingSignals = await db.aiSignal.findMany({
-    where: {
-      direction: { in: ['long', 'short'] },
-      createdAt: { lt: cutoff },
-      outcome: null,
-    },
-    take: 50, // process at most 50 at a time
-  })
+  const pendingSignals = await db.select().from(aiSignals).where(
+    and(
+      inArray(aiSignals.direction, ['long', 'short']),
+      lt(aiSignals.createdAt, cutoff),
+      not(exists(
+        db.select({ one: sql`1` }).from(aiSignalOutcomes).where(eq(aiSignalOutcomes.signalId, aiSignals.id)),
+      )),
+    ),
+  ).limit(50) // process at most 50 at a time
 
   let evaluated = 0
   let correct = 0

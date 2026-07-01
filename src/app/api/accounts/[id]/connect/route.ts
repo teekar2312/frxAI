@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, accounts, eq } from '@/lib/db'
 import { logInfo, logWarn } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -20,16 +20,15 @@ export async function POST(
 
   try {
     const { id } = await params
-    const account = await db.account.findUnique({ where: { id } })
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.id, id) })
     if (!account) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
     const next = !account.connected
-    const updated = await db.account.update({
-      where: { id },
-      data: { connected: next },
-    })
+    await db.update(accounts).set({ connected: next }).where(eq(accounts.id, id))
+
+    const updated = await db.query.accounts.findFirst({ where: eq(accounts.id, id) })
 
     if (next) {
       await logInfo('mt5', `MT5 connected: ${account.name} (login ${account.login})`, {

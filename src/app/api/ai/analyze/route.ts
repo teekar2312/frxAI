@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, newsItems, indicators, eq, desc } from '@/lib/db'
 import { analyzeSymbol } from '@/lib/ai'
 import { requireAuth } from '@/lib/auth-server'
 import { apiCatch } from '@/lib/api-handler'
@@ -28,9 +28,9 @@ export async function POST(req: NextRequest) {
     }
     const { symbol, timeframe } = validated.data
 
-    const recentNewsRows = await db.newsItem.findMany({
-      orderBy: { publishedAt: 'desc' },
-      take: 15,
+    const recentNewsRows = await db.query.newsItems.findMany({
+      orderBy: desc(newsItems.publishedAt),
+      limit: 15,
     })
     const recentNews = recentNewsRows.map((n) => ({
       title: n.title,
@@ -40,10 +40,7 @@ export async function POST(req: NextRequest) {
       impact: n.impact,
     }))
 
-    const enabledRows = await db.indicator.findMany({
-      where: { enabled: true },
-      select: { name: true },
-    })
+    const enabledRows = await db.select({ name: indicators.name }).from(indicators).where(eq(indicators.enabled, true))
     const enabledIndicators = enabledRows.map((r) => r.name)
 
     const signal = await analyzeSymbol({ symbol, recentNews, enabledIndicators, timeframe })

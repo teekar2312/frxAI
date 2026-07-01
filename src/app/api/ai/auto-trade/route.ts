@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, riskSettings, accounts, trades, aiSignals, eq, and, gte, desc, sql } from '@/lib/db'
 import { bidAsk, calcLotSize } from '@/lib/market'
 import { checkNewsAvoidance } from '@/lib/news-avoidance'
 import { logInfo, logWarn, sendNotification } from '@/lib/logger'
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // 1. Check auto-trading is enabled
-    const autoSetting = await db.riskSetting.findUnique({ where: { key: 'autoTradingEnabled' } })
+    const autoSetting = await db.query.riskSettings.findFirst({ where: eq(riskSettings.key, 'autoTradingEnabled') })
     if (!autoSetting || autoSetting.value !== 'true') {
       return NextResponse.json({
         enabled: false,
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Get default account
-    const account = await db.account.findFirst({ where: { isDefault: true } })
+    const account = await db.query.accounts.findFirst({ where: eq(accounts.isDefault, true) })
     if (!account) {
       return NextResponse.json({ enabled: true, error: 'No default account found' }, { status: 400 })
     }
@@ -58,10 +58,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Load risk settings (used for signal filtering + lot sizing)
-    const riskPerTradeStr = (await db.riskSetting.findUnique({ where: { key: 'riskPerTradePct' } }))?.value || '0.75'
-    const slPipsStr = (await db.riskSetting.findUnique({ where: { key: 'stopLossPipsMax' } }))?.value || '15'
-    const confThresholdStr = (await db.riskSetting.findUnique({ where: { key: 'autoTradeConfidenceThreshold' } }))?.value || '70'
-    const signalMaxAgeStr = (await db.riskSetting.findUnique({ where: { key: 'autoTradeSignalMaxAgeMin' } }))?.value || '10'
+    const riskPerTradeStr = (await db.query.riskSettings.findFirst({ where: eq(riskSettings.key, 'riskPerTradePct') }))?.value || '0.75'
+    const slPipsStr = (await db.query.riskSettings.findFirst({ where: eq(riskSettings.key, 'stopLossPipsMax') }))?.value || '15'
+    const confThresholdStr = (await db.query.riskSettings.findFirst({ where: eq(riskSettings.key, 'autoTradeConfidenceThreshold') }))?.value || '70'
+    const signalMaxAgeStr = (await db.query.riskSettings.findFirst({ where: eq(riskSettings.key, 'autoTradeSignalMaxAgeMin') }))?.value || '10'
 
     const riskPerTrade = parseFloat(riskPerTradeStr)
     const slPips = parseFloat(slPipsStr)
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     // 4. Pre-check: daily loss circuit breaker (fast fail before scanning signals)
     // The full enforceTradeOpen() is called per-trade below, but this early check
     // avoids unnecessary signal scanning when we're already in circuit breaker.
-    const openTrades = await db.trade.findMany({ where: { accountId: account.id, status: 'open' } })
+    const openTrades = await db.query.trades.findMany({ where: and(eq(trades.accountId, account.id), eq(trades.status, 'open')) })
 
     // 5. Find latest signal per symbol + execute
     const executed: any[] = []
@@ -80,9 +80,9 @@ export async function POST(req: NextRequest) {
     const bridgeOk = (await bridgeHealth()).ok
 
     for (const symbol of SYMBOLS) {
-      const latestSignal = await db.aiSignal.findFirst({
-        where: { symbol },
-        orderBy: { createdAt: 'desc' },
+      const latestSignal = await db.query.aiSignals.findFirst({
+        where: eq(aiSignals.symbol, symbol),
+        orderBy: desc(aiSignals.createdAt),
       })
 
       if (!latestSignal) continue
@@ -98,13 +98,13 @@ export async function POST(req: NextRequest) {
       if (signalAge > signalMaxAgeMin) continue
 
       // Skip if we recently auto-traded this symbol (dedup)
-      const recentAutoTrade = await db.trade.findFirst({
-        where: {
-          accountId: account.id,
-          symbol,
-          source: 'ai',
-          openTime: { gte: new Date(Date.now() - MINUTES_BETWEEN_SIGNALS * 60000) },
-        },
+      const recentAutoTrade = await db.query.trades.findFirst({
+        where: and(
+          eq(trades.accountId, account.id),
+          eq(trades.symbol, symbol),
+          eq(trades.source, 'ai'),
+          gte(trades.openTime, new Date(Date.now() - MINUTES_BETWEEN_SIGNALS * 60000)),
+        ),
       })
       if (recentAutoTrade) continue
 
@@ -177,37 +177,33 @@ export async function POST(req: NextRequest) {
       }
 
       // Create trade + update margin atomically
-      const [trade] = await db.$transaction([
-        db.trade.create({
-          data: {
-            accountId: account.id,
-            symbol,
-            side,
-            lotSize: lot,
-            openPrice: finalOpenPrice,
-            stopLoss: Number(stopLoss.toFixed(5)),
-            takeProfit: Number(takeProfit.toFixed(5)),
-            trailingStop: false,
-            trailingPips: 0,
-            status: 'open',
-            pnl: 0,
-            pips: 0,
-            commission,
-            swap: 0,
-            strategy: 'scalping-m5',
-            timeframe: 'M5',
-            source: 'ai',
-            comment: `Auto: signal ${latestSignal.confidence}% ${latestSignal.direction}`,
-            mt5Ticket,
-            mt5Server,
-            openTime: new Date(),
-          },
-        }),
-        db.account.update({
-          where: { id: account.id },
-          data: { margin: { increment: lot * 1000 } },
-        }),
-      ])
+      const [trade] = await db.transaction(async (tx) => {
+        const [created] = await tx.insert(trades).values({
+          accountId: account.id,
+          symbol,
+          side,
+          lotSize: lot,
+          openPrice: finalOpenPrice,
+          stopLoss: Number(stopLoss.toFixed(5)),
+          takeProfit: Number(takeProfit.toFixed(5)),
+          trailingStop: false,
+          trailingPips: 0,
+          status: 'open',
+          pnl: 0,
+          pips: 0,
+          commission,
+          swap: 0,
+          strategy: 'scalping-m5',
+          timeframe: 'M5',
+          source: 'ai',
+          comment: `Auto: signal ${latestSignal.confidence}% ${latestSignal.direction}`,
+          mt5Ticket,
+          mt5Server,
+          openTime: new Date(),
+        }).returning()
+        await tx.update(accounts).set({ margin: sql`${accounts.margin} + ${lot * 1000}` }).where(eq(accounts.id, account.id))
+        return [created]
+      })
 
       // Add to open trades list so next iteration sees it
       openTrades.push(trade as any)

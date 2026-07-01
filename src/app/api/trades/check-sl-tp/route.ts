@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireServiceAuth } from '@/lib/service-auth'
-import { db } from '@/lib/db'
+import { db, trades, eq } from '@/lib/db'
 import { bidAsk, calcPnl } from '@/lib/market'
 import { SYMBOL_BASE } from '@/lib/types'
 import { logInfo, sendNotification } from '@/lib/logger'
@@ -26,9 +26,9 @@ export async function POST(req: NextRequest) {
   const skipped: any[] = []
 
   try {
-    const openTrades = await db.trade.findMany({
-      where: { status: 'open' },
-      include: { account: true },
+    const openTrades = await db.query.trades.findMany({
+      where: eq(trades.status, 'open'),
+      with: { account: true },
     })
 
     if (openTrades.length === 0) {
@@ -49,14 +49,14 @@ export async function POST(req: NextRequest) {
           newSl = currentPrice - trailDist
           // Only move SL up (never down)
           if (newSl > trade.stopLoss) {
-            await db.trade.update({ where: { id: trade.id }, data: { stopLoss: Number(newSl.toFixed(5)) } })
+            await db.update(trades).set({ stopLoss: Number(newSl.toFixed(5)) }).where(eq(trades.id, trade.id))
             trailed.push({ id: trade.id, symbol: trade.symbol, side: trade.side, oldSl: trade.stopLoss, newSl: Number(newSl.toFixed(5)) })
           }
         } else {
           newSl = currentPrice + trailDist
           // Only move SL down (never up) for sells
           if (newSl < trade.stopLoss) {
-            await db.trade.update({ where: { id: trade.id }, data: { stopLoss: Number(newSl.toFixed(5)) } })
+            await db.update(trades).set({ stopLoss: Number(newSl.toFixed(5)) }).where(eq(trades.id, trade.id))
             trailed.push({ id: trade.id, symbol: trade.symbol, side: trade.side, oldSl: trade.stopLoss, newSl: Number(newSl.toFixed(5)) })
           }
         }

@@ -1,5 +1,5 @@
 import 'server-only'
-import { db } from './db'
+import { db, logs } from './db'
 import { logInfo, logWarn, logError } from './logger'
 
 export type AuditAction =
@@ -35,20 +35,18 @@ export async function audit(entry: AuditEntry): Promise<void> {
   const source = entry.action.split('.')[0] // e.g. 'trade', 'ai', 'risk'
 
   // Log to database
-  await db.log.create({
-    data: {
-      level,
-      source,
-      message: `[AUDIT] ${entry.action}: ${entry.resourceType}=${entry.resource}${entry.actor ? ` by ${entry.actor}` : ''}`,
-      context: JSON.stringify({
-        action: entry.action,
-        resource: entry.resource,
-        resourceType: entry.resourceType,
-        actor: entry.actor,
-        ...entry.details,
-        timestamp: new Date().toISOString(),
-      }),
-    },
+  await db.insert(logs).values({
+    level,
+    source,
+    message: `[AUDIT] ${entry.action}: ${entry.resourceType}=${entry.resource}${entry.actor ? ` by ${entry.actor}` : ''}`,
+    context: JSON.stringify({
+      action: entry.action,
+      resource: entry.resource,
+      resourceType: entry.resourceType,
+      actor: entry.actor,
+      ...entry.details,
+      timestamp: new Date().toISOString(),
+    }),
   }).catch(() => {
     // If DB write fails, still log to console
     console.error(`[AUDIT-DB-FAIL] ${entry.action} ${entry.resourceType}=${entry.resource}`)

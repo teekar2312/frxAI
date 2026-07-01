@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, alerts, eq } from '@/lib/db'
 import { sendWebhook } from '@/lib/webhook'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
@@ -27,7 +27,7 @@ export async function PATCH(
     // on all their channels (Discord/Telegram/Slack) — best-effort, never throws.
     if (data.triggered === true) {
       try {
-        const alert = await db.alert.findUnique({ where: { id } })
+        const alert = await db.query.alerts.findFirst({ where: eq(alerts.id, id) })
         if (alert) {
           await sendWebhook({
             type: 'alert',
@@ -52,10 +52,9 @@ export async function PATCH(
       }
     }
 
-    const alert = await db.alert.update({
-      where: { id },
-      data,
-    })
+    await db.update(alerts).set(data).where(eq(alerts.id, id))
+
+    const updated = await db.query.alerts.findFirst({ where: eq(alerts.id, id) })
 
     await audit({
       action: 'alert.update',
@@ -64,7 +63,7 @@ export async function PATCH(
       details: { changes: data },
     })
 
-    return NextResponse.json({ alert })
+    return NextResponse.json({ alert: updated })
   } catch (e) {
     return apiCatch(e, 'alerts', 'PATCH', req)
   }
@@ -79,7 +78,7 @@ export async function DELETE(
 
   try {
     const { id } = await params
-    await db.alert.delete({ where: { id } })
+    await db.delete(alerts).where(eq(alerts.id, id))
 
     await audit({
       action: 'alert.delete',
