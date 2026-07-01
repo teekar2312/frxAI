@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-server'
 import { updateUser, resetUserPassword, deleteUser, type UserRole } from '@/lib/auth'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +17,9 @@ export async function PATCH(
 ) {
   const currentUser = await requireAdmin()
   if (currentUser instanceof NextResponse) return currentUser
+
+  const limited = applyRateLimit(req, RATE_LIMITS.userManage)
+  if (limited) return limited
 
   try {
     const { id } = await params
@@ -42,12 +48,12 @@ export async function PATCH(
     }
 
     const updated = await updateUser(id, updates)
+
+    await audit({ action: 'user.update', resource: id, resourceType: 'user', actor: currentUser.email, details: { updatedFields: Object.keys(updates) } })
+
     return NextResponse.json({ user: updated })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to update user' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'users', 'PATCH', req)
   }
 }
 
@@ -77,11 +83,8 @@ export async function POST(
 
     await resetUserPassword(id, password)
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to reset password' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'users', 'POST', req)
   }
 }
 
@@ -90,11 +93,14 @@ export async function POST(
  * Cannot delete yourself.
  */
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const currentUser = await requireAdmin()
   if (currentUser instanceof NextResponse) return currentUser
+
+  const limited = applyRateLimit(req, RATE_LIMITS.userManage)
+  if (limited) return limited
 
   try {
     const { id } = await params
@@ -107,11 +113,11 @@ export async function DELETE(
     }
 
     await deleteUser(id)
+
+    await audit({ action: 'user.delete', resource: id, resourceType: 'user', actor: currentUser.email, details: {} })
+
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to delete user' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'users', 'DELETE', req)
   }
 }

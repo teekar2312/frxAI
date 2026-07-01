@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +11,11 @@ export const dynamic = 'force-dynamic'
 // - Plus always enable: ATR, Bollinger, VWAP
 // - Enable trend+oscillator with weight > 0.7
 // - Disable the rest but keep autoManaged flag for future re-pick
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.aiIndicatorSelect)
+  if (limited) return limited
+
   try {
     const all = await db.indicator.findMany({ orderBy: { weight: 'desc' } })
     const alwaysOn = new Set(['ATR', 'Bollinger Bands', 'Bollinger', 'VWAP'])
@@ -44,6 +50,6 @@ export async function POST() {
 
     return NextResponse.json({ indicators })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'indicators', 'POST', req)
   }
 }

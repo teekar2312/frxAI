@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { validateBody, systemConfigSchema } from '@/lib/validations'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,19 +14,41 @@ export async function GET() {
     for (const r of rows) config[r.key] = r.value
     return NextResponse.json({ config })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'system', 'GET')
   }
 }
 
 export async function PATCH(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.systemConfigUpdate)
+  if (limited) return limited
+
   try {
     const body = await req.json()
-    const incoming: Record<string, unknown> = body?.config ?? {}
-    if (typeof incoming !== 'object' || incoming === null) {
-      return NextResponse.json({ error: 'config must be an object' }, { status: 400 })
+
+    // Zod validation
+    const validated = validateBody(systemConfigSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
 
-    const ops = Object.entries(incoming).map(([key, value]) =>
+    const incoming = validated.data.config
+
+    // Audit each config change
+    const entries = Object.entries(incoming)
+    for (const [key, value] of entries) {
+      const existing = await db.systemConfig.findUnique({ where: { key } })
+      const oldValue = existing?.value || ''
+
+      await audit({
+        action: 'system.config-change',
+        resource: key,
+        resourceType: 'system-config',
+        details: { oldValue, newValue: value },
+      })
+    }
+
+    const ops = entries.map(([key, value]) =>
       db.systemConfig.upsert({
         where: { key },
         update: { value: String(value) },
@@ -36,6 +62,6 @@ export async function PATCH(req: NextRequest) {
     for (const r of rows) config[r.key] = r.value
     return NextResponse.json({ config })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'system', 'PATCH', req)
   }
 }

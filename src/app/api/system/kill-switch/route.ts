@@ -7,6 +7,8 @@ import { closePosition as mt5ClosePosition } from '@/lib/mt5-client'
 import { bidAsk, calcPnl } from '@/lib/market'
 import { requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { apiCatch } from '@/lib/api-handler'
+import { auditRisk } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 4. Log + webhook ───────────────────────────────────────────────────────
+    // ── 4. Log + webhook + audit ───────────────────────────────────────────────
     await logInfo('risk', `KILL SWITCH complete: ${closed.length} closed, ${failed.length} failed, total P&L $${totalPnl.toFixed(2)}`, {
       accountId: account.id,
       triggeredBy,
@@ -162,6 +164,9 @@ export async function POST(req: NextRequest) {
       ],
     }).catch(() => null)
 
+    // Audit trail for kill switch
+    await auditRisk.killSwitch(triggeredBy, reason)
+
     return NextResponse.json({
       halted: true,
       autoTradingDisabled: true,
@@ -171,8 +176,7 @@ export async function POST(req: NextRequest) {
       count: closed.length,
       message: `🚨 KILL SWITCH: Auto-trading disabled. ${closed.length} position(s) closed. Total P&L: $${totalPnl.toFixed(2)}`,
     })
-  } catch (e: any) {
-    console.error('POST /api/system/kill-switch error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'system', 'POST', req, { severity: 'critical' })
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getRiskConfig, isDailyLossCircuitBreakerActive, enforceTradeOpen } from '@/lib/risk-enforcement'
 import { requireAuth } from '@/lib/auth-server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,10 +65,7 @@ export async function GET(req: NextRequest) {
         context: testCheck.context,
       },
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch enforcement status' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'risk', 'GET', req)
   }
 }

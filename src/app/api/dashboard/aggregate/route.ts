@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { apiCatch } from '@/lib/api-handler'
 import { db } from '@/lib/db'
 import {
   SUPPORTED_SYMBOLS,
@@ -191,10 +192,7 @@ export async function GET() {
     }
 
     return NextResponse.json({ aggregate })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to build aggregate dashboard' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'dashboard', 'GET')
   }
 }

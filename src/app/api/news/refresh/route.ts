@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo, logError } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +45,11 @@ const FALLBACK: DraftNews[] = [
   },
 ]
 
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.newsRefresh)
+  if (limited) return limited
+
   const drafts: DraftNews[] = []
 
   try {

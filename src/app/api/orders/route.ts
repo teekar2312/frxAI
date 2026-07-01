@@ -4,6 +4,8 @@ import { logInfo } from '@/lib/logger'
 import { requireAuth, requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { orderCreateSchema, validateBody } from '@/lib/validations'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,7 +28,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ orders })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'orders', 'GET', req)
   }
 }
 
@@ -66,6 +68,8 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    await audit({ action: 'order.create', resource: order.id, resourceType: 'order', actor: user.email, details: { symbol: order.symbol, side: order.side, lotSize: order.lotSize, price: order.price, orderType: order.orderType } })
+
     await logInfo(
       'mt5',
       `Pending ${orderType} order placed: ${side} ${lotSize} ${symbol} @ ${price}`,
@@ -74,6 +78,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ order })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'orders', 'POST', req)
   }
 }

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { atomicDeleteAccount } from '@/lib/db-transactions'
 import { requireAdmin } from '@/lib/auth-server'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +14,9 @@ export async function PATCH(
 ) {
   const user = await requireAdmin()
   if (user instanceof NextResponse) return user
+
+  const limited = applyRateLimit(req, RATE_LIMITS.general)
+  if (limited) return limited
 
   try {
     const { id } = await params
@@ -31,6 +37,9 @@ export async function PATCH(
       })
       // Re-fetch after transaction
       const updated = await db.account.findUnique({ where: { id } })
+
+      await audit({ action: 'account.update', resource: id, resourceType: 'account', actor: user.email, details: { isDefault: true } })
+
       return NextResponse.json({ account: updated })
     }
 
@@ -45,26 +54,35 @@ export async function PATCH(
     }
 
     const account = await db.account.update({ where: { id }, data })
+
+    await audit({ action: 'account.update', resource: id, resourceType: 'account', actor: user.email, details: { updatedFields: Object.keys(data) } })
+
     return NextResponse.json({ account })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'accounts', 'PATCH', req)
   }
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await requireAdmin()
   if (user instanceof NextResponse) return user
+
+  const limited = applyRateLimit(req, RATE_LIMITS.general)
+  if (limited) return limited
 
   try {
     const { id } = await params
     // Atomic delete: refuses to delete if open positions exist, then
     // deletes orders + trades + account in one transaction.
     await atomicDeleteAccount(id)
+
+    await audit({ action: 'account.delete', resource: id, resourceType: 'account', actor: user.email, details: {} })
+
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'accounts', 'DELETE', req)
   }
 }

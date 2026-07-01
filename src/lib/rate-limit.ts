@@ -194,4 +194,34 @@ export const RATE_LIMITS = {
   userCreate: { key: 'user-create', max: 5, windowSec: 3600 },
   /** General API: 100 per minute per IP */
   general: { key: 'general-api', max: 100, windowSec: 60 },
+  /** AI analyze: 5 per minute per IP (calls LLM — expensive) */
+  aiAnalyze: { key: 'ai-analyze', max: 5, windowSec: 60 },
+  /** AI auto-trade: 3 per minute per IP */
+  aiAutoTrade: { key: 'ai-auto-trade', max: 3, windowSec: 60 },
+  /** AI evaluate: 10 per minute per IP */
+  aiEvaluate: { key: 'ai-evaluate', max: 10, windowSec: 60 },
+  /** Backtest run: 3 per minute per IP (computationally expensive) */
+  backtestRun: { key: 'backtest-run', max: 3, windowSec: 60 },
+  /** Backtest optimize: 2 per minute per IP (very expensive) */
+  backtestOptimize: { key: 'backtest-optimize', max: 2, windowSec: 60 },
+  /** Alert create: 10 per minute per IP */
+  alertCreate: { key: 'alert-create', max: 10, windowSec: 60 },
+  /** Risk update: 10 per minute per IP */
+  riskUpdate: { key: 'risk-update', max: 10, windowSec: 60 },
+  /** System config update: 10 per minute per IP */
+  systemConfigUpdate: { key: 'system-config-update', max: 10, windowSec: 60 },
+  /** News refresh: 3 per minute per IP (calls LLM) */
+  newsRefresh: { key: 'news-refresh', max: 3, windowSec: 60 },
+  /** Calendar refresh: 3 per minute per IP (calls LLM) */
+  calendarRefresh: { key: 'calendar-refresh', max: 3, windowSec: 60 },
+  /** AI indicator select: 5 per minute per IP */
+  aiIndicatorSelect: { key: 'ai-indicator-select', max: 5, windowSec: 60 },
+  /** Account create: 5 per minute per IP */
+  accountCreate: { key: 'account-create', max: 5, windowSec: 60 },
+  /** Trade partial close: 20 per minute per IP */
+  tradePartialClose: { key: 'trade-partial-close', max: 20, windowSec: 60 },
+  /** Trade move to BE: 20 per minute per IP */
+  tradeMoveToBE: { key: 'trade-move-to-be', max: 20, windowSec: 60 },
+  /** User update/delete: 10 per minute per IP */
+  userManage: { key: 'user-manage', max: 10, windowSec: 60 },
 } as const

@@ -1,20 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { analyzeSymbol } from '@/lib/ai'
+import { requireAuth } from '@/lib/auth-server'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { validateBody, aiAnalyzeSchema } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
-const VALID_TIMEFRAMES = ['M1', 'M5', 'M15', 'H1'] as const
-type Timeframe = (typeof VALID_TIMEFRAMES)[number]
-
 export async function POST(req: NextRequest) {
+  // Auth guard
+  const user = await requireAuth()
+  if (user instanceof NextResponse) return user
+
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.aiAnalyze)
+  if (limited) return limited
+
   try {
     const body = await req.json().catch(() => ({}))
-    const symbol = body?.symbol
-    if (!symbol) {
-      return NextResponse.json({ error: 'symbol is required' }, { status: 400 })
+
+    // Zod validation
+    const validated = validateBody(aiAnalyzeSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
-    const timeframe: Timeframe = VALID_TIMEFRAMES.includes(body?.timeframe) ? body.timeframe : 'M5'
+    const { symbol, timeframe } = validated.data
 
     const recentNewsRows = await db.newsItem.findMany({
       orderBy: { publishedAt: 'desc' },
@@ -36,8 +48,16 @@ export async function POST(req: NextRequest) {
 
     const signal = await analyzeSymbol({ symbol, recentNews, enabledIndicators, timeframe })
 
+    await audit({
+      action: 'ai.signal',
+      actor: user.email,
+      resource: symbol,
+      resourceType: 'ai-signal',
+      details: { timeframe, confidence: signal?.confidence, direction: signal?.direction },
+    })
+
     return NextResponse.json({ signal })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'AI analyze failed' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'ai', 'POST', req)
   }
 }

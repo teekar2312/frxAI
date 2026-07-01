@@ -7,6 +7,9 @@ import { bidAsk, calcPnl } from '@/lib/market'
 import { closePosition as mt5ClosePosition } from '@/lib/mt5-client'
 import { atomicCloseTrade } from '@/lib/db-transactions'
 import { requireTrader } from '@/lib/auth-server'
+import { apiCatch } from '@/lib/api-handler'
+import { auditTrade } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +17,9 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(_req, RATE_LIMITS.tradeClose)
+  if (limited) return limited
+
   // Role guard: only trader+ can close trades
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
@@ -115,8 +121,10 @@ export async function POST(
       ],
     }).catch(() => null)
 
+    await auditTrade.close(id, { symbol: trade.symbol, side: trade.side, lotSize: trade.lotSize, closePrice, pnl: netPnl, pips, actor: user.email })
+
     return NextResponse.json({ trade: updated })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'trades', 'POST', _req)
   }
 }

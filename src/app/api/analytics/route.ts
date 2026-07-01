@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getSessions } from '@/lib/sessions'
 import type { TradeAnalytics } from '@/lib/types'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -270,8 +271,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ analytics })
-  } catch (e: any) {
-    console.error('GET /api/analytics error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'analytics', 'GET', req)
   }
 }

@@ -7,6 +7,8 @@ import { atomicCloseTrade } from '@/lib/db-transactions'
 import { closePosition as mt5ClosePosition } from '@/lib/mt5-client'
 import { requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { apiCatch } from '@/lib/api-handler'
+import { auditTrade } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -158,6 +160,8 @@ export async function POST(req: NextRequest) {
       failed: failed.map((f) => f.id),
     })
 
+    await auditTrade.closeAll({ count: closed.length, totalPnl, reason, actor: user.email })
+
     return NextResponse.json({
       closed,
       failed,
@@ -165,8 +169,7 @@ export async function POST(req: NextRequest) {
       count: closed.length,
       message: `${closed.length} position(s) closed. Total P&L: $${totalPnl.toFixed(2)}`,
     })
-  } catch (e: any) {
-    console.error('POST /api/trades/close-all error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'trades', 'POST', req)
   }
 }

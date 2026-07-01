@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-server'
 import { getErrorStats, checkErrorRateSpike } from '@/lib/error-monitor'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
  * Query params:
  *   hours=24 — how many hours back to look
  */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const user = await requireAuth()
   if (user instanceof NextResponse) return user
 
@@ -36,10 +37,7 @@ export async function GET(req: Request) {
       spike,
       timestamp: new Date().toISOString(),
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch error stats' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'system', 'GET', req)
   }
 }

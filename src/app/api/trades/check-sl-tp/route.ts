@@ -4,6 +4,7 @@ import { bidAsk, calcPnl } from '@/lib/market'
 import { logInfo, sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
 import { atomicCloseTrade } from '@/lib/db-transactions'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -141,8 +142,7 @@ export async function POST() {
       skipped,
       checked: openTrades.length,
     })
-  } catch (e: any) {
-    console.error('POST /api/trades/check-sl-tp error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'trades', 'POST')
   }
 }

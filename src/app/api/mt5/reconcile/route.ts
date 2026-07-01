@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-server'
 import { reconcileAccountPositions, reconcileAllAccounts } from '@/lib/reconciliation'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,10 +51,7 @@ export async function POST(req: NextRequest) {
     // Reconcile all accounts
     const report = await reconcileAllAccounts()
     return NextResponse.json({ report })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to reconcile positions' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'mt5', 'POST', req)
   }
 }

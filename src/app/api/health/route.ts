@@ -90,7 +90,23 @@ export async function GET() {
     // Price feed offline is non-critical — app uses synthetic fallback
   }
 
-  // 7. SL/TP monitor service check (port 3004)
+  // 7. MT5-bridge mini-service check (port 3002)
+  try {
+    const bridgeMiniStart = Date.now()
+    const bridgeMiniRes = await fetch('http://localhost:3002/health', { signal: AbortSignal.timeout(3000) })
+    const bridgeMiniLatency = Date.now() - bridgeMiniStart
+    checks.mt5BridgeMiniService = {
+      status: bridgeMiniRes.ok ? 'ok' : 'error',
+      latency: bridgeMiniLatency,
+      detail: bridgeMiniRes.ok ? 'healthy' : `HTTP ${bridgeMiniRes.status}`,
+    }
+    if (!bridgeMiniRes.ok) allOk = false
+  } catch (e: any) {
+    checks.mt5BridgeMiniService = { status: 'error', detail: e?.message || 'unreachable' }
+    // MT5-bridge mini-service offline means bridge commands go through HTTP fallback
+  }
+
+  // 8. SL/TP monitor service check (port 3004)
   try {
     const sltpStart = Date.now()
     const sltpRes = await fetch('http://localhost:3004/health', { signal: AbortSignal.timeout(3000) })
@@ -107,7 +123,7 @@ export async function GET() {
   }
 
   // Summary of which mini-services are running
-  const miniServices = ['priceFeedService', 'sltpMonitorService']
+  const miniServices = ['priceFeedService', 'mt5BridgeMiniService', 'sltpMonitorService']
   const miniServicesRunning = miniServices.filter(k => checks[k]?.status === 'ok').length
   checks.summary = {
     status: 'ok' as const,

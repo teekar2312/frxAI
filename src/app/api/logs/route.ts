@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,8 +21,8 @@ export async function GET(req: NextRequest) {
       take: Math.max(1, Math.min(1000, limit)),
     })
     return NextResponse.json({ logs })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to fetch logs' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'logs', 'GET', req)
   }
 }
 
@@ -45,8 +46,8 @@ export async function POST(req: NextRequest) {
       },
     })
     return NextResponse.json({ log })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to create log' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'logs', 'POST', req)
   }
 }
 
@@ -54,7 +55,7 @@ export async function DELETE() {
   try {
     await db.log.deleteMany({})
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to clear logs' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'logs', 'DELETE')
   }
 }

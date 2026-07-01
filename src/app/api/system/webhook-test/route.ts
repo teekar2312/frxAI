@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { sendTestWebhook } from '@/lib/webhook'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,9 +40,6 @@ export async function POST() {
       message: `Test webhook sent to: ${targets.join(', ')}`,
     })
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: (e as Error).message || 'Failed to send test webhook' },
-      { status: 500 },
-    )
+    return apiCatch(e, 'system', 'POST')
   }
 }

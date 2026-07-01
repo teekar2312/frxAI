@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-server'
 import { computeOverallAccuracy, computeRealAccuracy } from '@/lib/ai-evaluation'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
  * Query params:
  *   symbol=EURUSD — get accuracy for a specific symbol only
  */
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const user = await requireAuth()
   if (user instanceof NextResponse) return user
 
@@ -32,10 +33,7 @@ export async function GET(req: Request) {
 
     const overall = await computeOverallAccuracy()
     return NextResponse.json(overall)
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch AI quality metrics' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'ai', 'GET', req)
   }
 }

@@ -2,19 +2,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { accountCreateSchema, validateBody } from '@/lib/validations'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { auditAccount } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const accounts = await db.account.findMany({ orderBy: { createdAt: 'asc' } })
     return NextResponse.json({ accounts })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'accounts', 'GET', req)
   }
 }
 
 export async function POST(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.accountCreate)
+  if (limited) return limited
+
   try {
     const body = await req.json()
     const validated = validateBody(accountCreateSchema, body)
@@ -52,8 +58,14 @@ export async function POST(req: NextRequest) {
       accountId: account.id,
     })
 
+    await auditAccount.create(account.id, {
+      name: account.name,
+      login: account.login,
+      actor: 'system',
+    })
+
     return NextResponse.json({ account })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'accounts', 'POST', req)
   }
 }

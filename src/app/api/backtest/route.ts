@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { runBacktest } from '@/lib/backtest'
 import { findStrategy } from '@/lib/strategies'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { validateBody, backtestCreateSchema } from '@/lib/validations'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,14 +24,25 @@ export async function GET(req: NextRequest) {
       take: Math.max(1, Math.min(200, limit)),
     })
     return NextResponse.json({ backtests })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to fetch backtests' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'backtest', 'GET', req)
   }
 }
 
 export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.backtestRun)
+  if (limited) return limited
+
   try {
     const body = await req.json().catch(() => ({}))
+
+    // Zod validation
+    const validated = validateBody(backtestCreateSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
+    }
+
     const {
       name,
       symbol,
@@ -39,14 +54,7 @@ export async function POST(req: NextRequest) {
       riskPerTradePct,
       stopLossPips,
       riskReward,
-    } = body || {}
-
-    if (!name || !symbol || !strategy) {
-      return NextResponse.json(
-        { error: 'name, symbol, strategy are required' },
-        { status: 400 },
-      )
-    }
+    } = validated.data
 
     // Look up the strategy preset to get EMA periods + default risk params.
     const strat = findStrategy(strategy)
@@ -77,8 +85,15 @@ export async function POST(req: NextRequest) {
       rsiOversold: strat?.preset.rsiOversold,
     })
 
+    await audit({
+      action: 'backtest.run',
+      resource: backtest.id || name,
+      resourceType: 'backtest',
+      details: { symbol, strategy, timeframe, totalTrades: backtest.totalTrades, netProfit: backtest.netProfit },
+    })
+
     return NextResponse.json({ backtest })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Backtest failed' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'backtest', 'POST', req)
   }
 }

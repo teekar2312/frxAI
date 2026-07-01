@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import {
   SUPPORTED_SYMBOLS,
@@ -11,6 +11,7 @@ import { bidAsk, sparkline, dayHighLow, changePct24h, priceAt } from '@/lib/mark
 import { getSessions, getOverlap } from '@/lib/sessions'
 import { computeRiskUsage } from '@/lib/risk-usage'
 import { bridgeHealth, getTick, getAccountInfo } from '@/lib/mt5-client'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,7 +85,7 @@ function buildEquitySpark(balance: number, todayPnl: number): number[] {
   return out
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
     const requestedAccountId = searchParams.get('accountId')
@@ -180,10 +181,7 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json(payload)
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to build dashboard' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'dashboard', 'GET', req)
   }
 }

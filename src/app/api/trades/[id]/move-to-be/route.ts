@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo, sendNotification } from '@/lib/logger'
 import { SYMBOL_BASE } from '@/lib/types'
+import { apiCatch } from '@/lib/api-handler'
+import { auditTrade } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { moveToBESchema, validateBody } from '@/lib/validations'
+import { requireTrader } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,10 +19,20 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.tradeMoveToBE)
+  if (limited) return limited
+
+  const user = await requireTrader()
+  if (user instanceof NextResponse) return user
+
   try {
     const { id } = await params
     const body = await req.json().catch(() => ({}))
-    const bufferPips = Math.max(0, Math.min(20, Number(body.bufferPips) || 0))
+    const validated = validateBody(moveToBESchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
+    }
+    const bufferPips = validated.data.bufferPips
 
     const trade = await db.trade.findUnique({ where: { id }, include: { account: true } })
     if (!trade) {
@@ -75,6 +90,8 @@ export async function POST(
       // email failure is non-fatal
     }
 
+    await auditTrade.moveToBE(id, { symbol: trade.symbol, side: trade.side, lotSize: trade.lotSize, previousSl, newSl, bufferPips, actor: user.email })
+
     return NextResponse.json({
       trade: updated,
       previousSl,
@@ -82,10 +99,7 @@ export async function POST(
       bufferPips,
       message: `SL dipindah ke break-even (${newSl})${bufferPips > 0 ? ` +${bufferPips}p buffer` : ''}`,
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to move stop-loss to break-even' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'trades', 'POST', req)
   }
 }

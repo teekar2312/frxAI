@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,8 +86,7 @@ export async function GET(req: NextRequest) {
         'Content-Disposition': `attachment; filename="finexfx-trades-${status}-${new Date().toISOString().slice(0, 10)}.csv"`,
       },
     })
-  } catch (e: any) {
-    console.error('GET /api/trades/export error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'trades', 'GET', req)
   }
 }

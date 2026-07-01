@@ -3,6 +3,9 @@ import { requireAuth } from '@/lib/auth-server'
 import { db } from '@/lib/db'
 import { verifyPassword, hashPassword } from '@/lib/auth'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { validateBody, passwordChangeSchema } from '@/lib/validations'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,21 +26,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { currentPassword, newPassword } = body || {}
-
-    if (!currentPassword || !newPassword) {
-      return NextResponse.json(
-        { error: 'currentPassword and newPassword are required' },
-        { status: 400 },
-      )
+    const validated = validateBody(passwordChangeSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
     }
-
-    if (newPassword.length < 6) {
-      return NextResponse.json(
-        { error: 'New password must be at least 6 characters' },
-        { status: 400 },
-      )
-    }
+    const { currentPassword, newPassword } = validated.data
 
     // Verify current password
     const dbUser = await db.user.findUnique({ where: { id: user.id } })
@@ -60,11 +53,10 @@ export async function POST(req: NextRequest) {
       data: { passwordHash },
     })
 
+    await audit({ action: 'user.update', resource: user.id, resourceType: 'user', actor: user.email, details: { field: 'password' } })
+
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to change password' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'auth', 'POST', req)
   }
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendWebhook } from '@/lib/webhook'
 import { logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,21 +54,37 @@ export async function PATCH(
       where: { id },
       data,
     })
+
+    await audit({
+      action: 'alert.update',
+      resource: id,
+      resourceType: 'alert',
+      details: { changes: data },
+    })
+
     return NextResponse.json({ alert })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to update alert' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'alerts', 'PATCH', req)
   }
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params
     await db.alert.delete({ where: { id } })
+
+    await audit({
+      action: 'alert.delete',
+      resource: id,
+      resourceType: 'alert',
+      details: {},
+    })
+
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to delete alert' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'alerts', 'DELETE', req)
   }
 }

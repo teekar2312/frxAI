@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendNotification, logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,8 +86,7 @@ Spread dapat melebar signifikan dan slippage tinggi dapat terjadi.
     }
 
     return NextResponse.json({ alerted, checked: events.length })
-  } catch (e: any) {
-    console.error('POST /api/economic-calendar/check-alerts error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'economic-calendar', 'POST')
   }
 }

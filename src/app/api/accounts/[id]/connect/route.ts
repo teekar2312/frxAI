@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo, logWarn } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { auditAccount } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.general)
+  if (limited) return limited
+
   try {
     const { id } = await params
     const account = await db.account.findUnique({ where: { id } })
@@ -25,6 +31,7 @@ export async function POST(
       await logInfo('mt5', `MT5 connected: ${account.name} (login ${account.login})`, {
         accountId: id,
       })
+      await auditAccount.connect(id, { name: account.name, login: account.login, actor: 'system' })
     } else {
       await logWarn('mt5', `MT5 disconnected: ${account.name} (login ${account.login})`, {
         accountId: id,
@@ -33,6 +40,6 @@ export async function POST(
 
     return NextResponse.json({ account: updated, connected: next })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'accounts', 'POST', req)
   }
 }

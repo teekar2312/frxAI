@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { bidAsk, calcLotSize } from '@/lib/market'
 import { checkNewsAvoidance } from '@/lib/news-avoidance'
@@ -8,6 +8,9 @@ import type { SupportedSymbol } from '@/lib/types'
 import { requireTrader } from '@/lib/auth-server'
 import { enforceTradeOpen } from '@/lib/risk-enforcement'
 import { bridgeHealth, marketOrder as mt5MarketOrder } from '@/lib/mt5-client'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +24,11 @@ const MINUTES_BETWEEN_SIGNALS = 5 // dedup window: avoid re-executing same symbo
 // r12-SAFETY: Now calls enforceTradeOpen() before EACH trade — the same 8-check
 // gauntlet that manual trades go through. No more bypass.
 // Returns a summary of actions taken.
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.aiAutoTrade)
+  if (limited) return limited
+
   // Role guard: only trader+ can trigger auto-trade (viewer cannot)
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
@@ -248,6 +255,14 @@ export async function POST() {
         : 'Tidak ada sinyal yang memenuhi kriteria auto-trade (confidence ≥ 70, action buy/sell, no news conflict).'
       : `${executed.length} auto-trade dieksekusi.${rejected.length > 0 ? ` ${rejected.length} ditolak risk.` : ''}`
 
+    await audit({
+      action: 'ai.auto-trade',
+      actor: user.email,
+      resource: 'system',
+      resourceType: 'auto-trade',
+      details: { executedCount: executed.length, rejectedCount: rejected.length, summary },
+    })
+
     return NextResponse.json({
       enabled: true,
       message: summary,
@@ -256,8 +271,7 @@ export async function POST() {
       openPositions: openTrades.length,
       todayPnlPct: 0, // computed in enforceTradeOpen context, not surfaced here
     })
-  } catch (e: any) {
-    console.error('POST /api/ai/auto-trade error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'ai', 'POST', req)
   }
 }

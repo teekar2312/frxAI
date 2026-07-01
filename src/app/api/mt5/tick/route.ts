@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getTick } from '@/lib/mt5-client'
 import { bidAsk } from '@/lib/market'
 import { SUPPORTED_SYMBOLS } from '@/lib/types'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,10 +41,7 @@ export async function GET(req: NextRequest) {
       },
       source: 'synthetic-fallback',
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch tick' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'mt5', 'GET', req)
   }
 }

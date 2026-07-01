@@ -1,12 +1,18 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 // POST /api/economic-calendar/refresh
 // Uses LLM to synthesize fresh upcoming economic events.
-export async function POST() {
+export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.calendarRefresh)
+  if (limited) return limited
+
   let synthesized = 0
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -53,7 +59,7 @@ Return ONLY a JSON array. Vary the times during market hours (6:00-20:00 UTC).`,
       }
     }
   } catch (e: any) {
-    console.error('economic-calendar/refresh LLM failed', e.message)
+    console.error('economic-calendar/refresh LLM failed', e?.message || String(e))
   }
 
   // Fallback: if LLM produced nothing, insert 3 deterministic items

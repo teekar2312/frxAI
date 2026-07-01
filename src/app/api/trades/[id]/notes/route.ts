@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,10 +38,7 @@ export async function PATCH(
     )
 
     return NextResponse.json({ trade })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to update trade note' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'trades', 'PATCH', req)
   }
 }

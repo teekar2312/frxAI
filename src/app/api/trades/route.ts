@@ -10,6 +10,8 @@ import { requireTrader } from '@/lib/auth-server'
 import { enforceTradeOpen } from '@/lib/risk-enforcement'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { tradeCreateSchema, validateBody } from '@/lib/validations'
+import { apiCatch } from '@/lib/api-handler'
+import { auditTrade } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,7 +36,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ trades })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'trades', 'GET', req)
   }
 }
 
@@ -217,8 +219,10 @@ export async function POST(req: NextRequest) {
       ],
     }).catch(() => null)
 
+    await auditTrade.open(trade.id, { symbol: trade.symbol, side: trade.side, lotSize: trade.lotSize, openPrice: trade.openPrice, source: trade.source, actor: user.email })
+
     return NextResponse.json({ trade })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'trades', 'POST', req)
   }
 }

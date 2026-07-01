@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { bidAsk, priceAt, sparkline, dayHighLow, changePct24h } from '@/lib/market'
 import { SUPPORTED_SYMBOLS, SYMBOL_BASE, type SymbolQuote } from '@/lib/types'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,6 @@ export async function GET() {
 
     return NextResponse.json({ symbols })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'symbols', 'GET')
   }
 }

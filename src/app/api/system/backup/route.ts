@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/auth-server'
 import { backupDatabase, listBackups, deleteBackup, getBackupStats } from '@/lib/db-backup'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,11 +37,8 @@ export async function GET(req: NextRequest) {
         createdAt: b.createdAt.toISOString(),
       })),
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch backup stats' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'system', 'GET', req)
   }
 }
 
@@ -53,6 +52,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const info = await backupDatabase()
+
+    await audit({
+      action: 'system.backup',
+      actor: user.email,
+      resource: info.filename,
+      resourceType: 'backup',
+      details: { sizeMB: Number((info.size / 1024 / 1024).toFixed(2)) },
+    })
+
     return NextResponse.json({
       ok: true,
       backup: {
@@ -63,11 +71,8 @@ export async function POST(req: NextRequest) {
       },
       message: `Backup created: ${info.filename} (${(info.size / 1024 / 1024).toFixed(2)} MB)`,
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to create backup' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'system', 'POST', req)
   }
 }
 
@@ -84,10 +89,7 @@ export async function DELETE(req: NextRequest) {
 
     await deleteBackup(filename)
     return NextResponse.json({ ok: true, message: `Backup ${filename} deleted` })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to delete backup' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'system', 'DELETE', req)
   }
 }

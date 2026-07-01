@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectMT5, disconnectMT5 } from '@/lib/mt5-client'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,11 +53,8 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json({ account })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to connect to MT5' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'mt5', 'POST', req)
   }
 }
 
@@ -73,10 +71,7 @@ export async function DELETE(req: NextRequest) {
     }
     await disconnectMT5(login)
     return NextResponse.json({ ok: true })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to disconnect' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'mt5', 'DELETE', req)
   }
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { requireTrader } from '@/lib/auth-server'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,6 +23,7 @@ export async function DELETE(
     }
 
     await db.order.update({ where: { id }, data: { status: 'cancelled' } })
+    await audit({ action: 'order.cancel', resource: id, resourceType: 'order', actor: user.email, details: { symbol: order.symbol, side: order.side, lotSize: order.lotSize, price: order.price } })
     await logInfo('mt5', `Order cancelled: ${order.side} ${order.lotSize} ${order.symbol} @ ${order.price}`, {
       orderId: id,
       accountId: order.accountId,
@@ -29,6 +32,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'orders', 'DELETE', _req)
   }
 }

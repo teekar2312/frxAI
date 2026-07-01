@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,6 @@ export async function PATCH(
     const indicator = await db.indicator.update({ where: { id }, data })
     return NextResponse.json({ indicator })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'indicators', 'PATCH', req)
   }
 }

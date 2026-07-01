@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +9,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.general)
+  if (limited) return limited
+
   try {
     const { id } = await params
     const body = await req.json()
@@ -32,6 +37,6 @@ export async function PATCH(
     const trade = await db.trade.update({ where: { id }, data })
     return NextResponse.json({ trade })
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 })
+    return apiCatch(e, 'trades', 'PATCH', req)
   }
 }

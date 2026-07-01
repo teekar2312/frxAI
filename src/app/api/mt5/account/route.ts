@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAccountInfo } from '@/lib/mt5-client'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,10 +20,7 @@ export async function GET(req: NextRequest) {
       )
     }
     return NextResponse.json({ account })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch account info' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'mt5', 'GET', req)
   }
 }

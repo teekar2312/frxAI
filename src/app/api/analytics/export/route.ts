@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -664,8 +665,7 @@ export async function GET(req: NextRequest) {
         'Cache-Control': 'no-store, max-age=0',
       },
     })
-  } catch (e: any) {
-    console.error('GET /api/analytics/export error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'analytics', 'GET', req)
   }
 }

@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/auth-server'
 import { getBars, bridgeHealth, type MT5Bar, type MT5Timeframe } from '@/lib/mt5-client'
 import { priceAt, SYMBOL_BASE } from '@/lib/market'
+import { apiCatch } from '@/lib/api-handler'
 
 export const dynamic = 'force-dynamic'
 
@@ -116,10 +117,7 @@ export async function GET(
         mt5Ticket: trade.mt5Ticket,
       },
     })
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Failed to fetch replay data' },
-      { status: 500 },
-    )
+  } catch (e) {
+    return apiCatch(e, 'trades', 'GET', req)
   }
 }

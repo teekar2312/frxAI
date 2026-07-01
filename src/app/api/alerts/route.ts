@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { alertCreateSchema, validateBody } from '@/lib/validations'
+import { apiCatch } from '@/lib/api-handler'
+import { audit } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,12 +14,16 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
     })
     return NextResponse.json({ alerts })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to fetch alerts' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'alerts', 'GET')
   }
 }
 
 export async function POST(req: NextRequest) {
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.alertCreate)
+  if (limited) return limited
+
   try {
     const body = await req.json().catch(() => ({}))
     const validated = validateBody(alertCreateSchema, body)
@@ -38,8 +45,14 @@ export async function POST(req: NextRequest) {
     await logInfo('system', `Alert created ${symbol} ${condition} ${price}`, {
       id: alert.id,
     })
+    await audit({
+      action: 'alert.create',
+      resource: alert.id,
+      resourceType: 'alert',
+      details: { symbol, condition, price },
+    })
     return NextResponse.json({ alert })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Failed to create alert' }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'alerts', 'POST', req)
   }
 }

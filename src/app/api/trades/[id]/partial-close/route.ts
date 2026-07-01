@@ -5,6 +5,10 @@ import { logInfo, sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
 import { atomicPartialCloseTrade } from '@/lib/db-transactions'
 import { requireTrader } from '@/lib/auth-server'
+import { apiCatch } from '@/lib/api-handler'
+import { auditTrade } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { partialCloseSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +27,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.tradePartialClose)
+  if (limited) return limited
+
   // Role guard: only trader+ can partially close trades
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
@@ -30,7 +37,11 @@ export async function POST(
   try {
     const { id } = await params
     const body = await req.json().catch(() => ({}))
-    const percent = Math.min(100, Math.max(1, Number(body.percent) || 50))
+    const validated = validateBody(partialCloseSchema, body)
+    if (!validated.success) {
+      return NextResponse.json(validated.error, { status: validated.error.status })
+    }
+    const percent = validated.data.percent
 
     const trade = await db.trade.findUnique({ where: { id }, include: { account: true } })
     if (!trade) {
@@ -99,6 +110,8 @@ export async function POST(
       ],
     }).catch(() => null)
 
+    await auditTrade.partialClose(id, { symbol: trade.symbol, side: trade.side, percent, closeLot, remainingLot, pnl: netPnl, pips, closePrice, actor: user.email })
+
     return NextResponse.json({
       closedTrade: result.closedTrade,
       remainingLot,
@@ -106,8 +119,7 @@ export async function POST(
       pips,
       closePrice,
     })
-  } catch (e: any) {
-    console.error('POST /api/trades/[id]/partial-close error', e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (e) {
+    return apiCatch(e, 'trades', 'POST', req)
   }
 }
