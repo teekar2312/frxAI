@@ -3,6 +3,8 @@ import { requireAuth } from '@/lib/auth-server'
 import { reconcileAccountPositions, reconcileAllAccounts } from '@/lib/reconciliation'
 import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { reconcileSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,9 +27,15 @@ export async function POST(req: NextRequest) {
   const user = await requireAuth()
   if (user instanceof NextResponse) return user
 
+  // Rate limit
+  const limited = applyRateLimit(req, RATE_LIMITS.reconcile)
+  if (limited) return limited
+
   try {
     const body = await req.json().catch(() => ({}))
-    const accountId = body?.accountId
+    const parsed = validateBody(reconcileSchema, body)
+    if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
+    const accountId = parsed.data.accountId
 
     if (accountId) {
       // Reconcile single account

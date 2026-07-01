@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { sendTestWebhook } from '@/lib/webhook'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,7 +10,10 @@ export const dynamic = 'force-dynamic'
  * Sends a test webhook to all configured targets (Discord, Telegram, Slack).
  * Body: (none required). If webhook_enabled=false, returns 400 with a hint.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.webhookTest)
+  if (limited) return limited
+
   try {
     const { targets, enabled } = await sendTestWebhook()
 

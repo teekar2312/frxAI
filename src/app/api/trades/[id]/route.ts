@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { tradeUpdateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,12 +28,9 @@ export async function PATCH(
       )
     }
 
-    const data: Record<string, unknown> = {}
-    if (body.stopLoss != null) data.stopLoss = Number(body.stopLoss)
-    if (body.takeProfit != null) data.takeProfit = Number(body.takeProfit)
-    if (body.trailingStop != null) data.trailingStop = Boolean(body.trailingStop)
-    if (body.trailingPips != null) data.trailingPips = Number(body.trailingPips)
-    if (body.comment !== undefined) data.comment = body.comment ? String(body.comment) : null
+    const result = validateBody(tradeUpdateSchema, body)
+    if (!result.success) return result.error
+    const data = result.data
 
     const trade = await db.trade.update({ where: { id }, data })
     return NextResponse.json({ trade })

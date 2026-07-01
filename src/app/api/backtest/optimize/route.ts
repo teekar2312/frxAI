@@ -4,6 +4,7 @@ import { STRATEGIES, findStrategy } from '@/lib/strategies'
 import { SUPPORTED_SYMBOLS } from '@/lib/types'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { backtestOptimizeSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,9 +19,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}))
-    const periodFrom = body.periodFrom ? new Date(body.periodFrom) : new Date(Date.now() - 7 * 24 * 3600 * 1000)
-    const periodTo = body.periodTo ? new Date(body.periodTo) : new Date()
-    const initialCapital = Number(body.initialCapital ?? 10000)
+    const parsed = validateBody(backtestOptimizeSchema, body)
+    if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
+    const { periodFrom: pfStr, periodTo: ptStr, initialCapital } = parsed.data
+    const periodFrom = pfStr ? new Date(pfStr) : new Date(Date.now() - 7 * 24 * 3600 * 1000)
+    const periodTo = ptStr ? new Date(ptStr) : new Date()
 
     if (isNaN(periodFrom.getTime()) || isNaN(periodTo.getTime()) || periodFrom >= periodTo) {
       return NextResponse.json({ error: 'Invalid periodFrom/periodTo' }, { status: 400 })

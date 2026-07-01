@@ -3,6 +3,7 @@ import { requireAdmin } from '@/lib/auth-server'
 import { updateUser, resetUserPassword, deleteUser, type UserRole } from '@/lib/auth'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { passwordResetSchema, userUpdateSchema, validateBody } from '@/lib/validations'
 import { audit } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -24,20 +25,9 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await req.json()
-    const updates: { role?: UserRole; active?: boolean; name?: string } = {}
-
-    if (body.role !== undefined) {
-      const validRoles: UserRole[] = ['admin', 'trader', 'viewer']
-      if (!validRoles.includes(body.role)) {
-        return NextResponse.json(
-          { error: `Invalid role. Must be one of: ${validRoles.join(', ')}` },
-          { status: 400 },
-        )
-      }
-      updates.role = body.role
-    }
-    if (body.active !== undefined) updates.active = !!body.active
-    if (body.name !== undefined) updates.name = String(body.name)
+    const parsed = validateBody(userUpdateSchema, body)
+    if (parsed.error) return parsed.error
+    const updates = parsed.data
 
     // Prevent admin from deactivating themselves
     if (currentUser.id === id && updates.active === false) {
@@ -66,20 +56,18 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.passwordChange)
+  if (limited) return limited
+
   const currentUser = await requireAdmin()
   if (currentUser instanceof NextResponse) return currentUser
 
   try {
     const { id } = await params
     const body = await req.json()
-    const { password } = body || {}
-
-    if (!password || password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters' },
-        { status: 400 },
-      )
-    }
+    const parsed = validateBody(passwordResetSchema, body)
+    if (parsed.error) return parsed.error
+    const { password } = parsed.data
 
     await resetUserPassword(id, password)
     return NextResponse.json({ ok: true })

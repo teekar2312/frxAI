@@ -80,6 +80,9 @@ export async function DELETE(req: NextRequest) {
   const user = await requireAdmin()
   if (user instanceof NextResponse) return user
 
+  const limited = applyRateLimit(req, RATE_LIMITS.backupDelete)
+  if (limited) return limited
+
   try {
     const { searchParams } = new URL(req.url)
     const filename = searchParams.get('filename')

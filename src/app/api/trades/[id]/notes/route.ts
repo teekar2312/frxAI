@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { tradeNotesSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,12 +16,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.tradeNote)
+  if (limited) return limited
+
   try {
     const { id } = await params
     const body = await req.json()
-    const comment = body.comment != null
-      ? (typeof body.comment === 'string' ? body.comment.slice(0, 500) : null)
-      : null
+    const result = validateBody(tradeNotesSchema, body)
+    if (!result.success) return result.error
+    const comment = result.data.comment
 
     const existing = await db.trade.findUnique({ where: { id } })
     if (!existing) {

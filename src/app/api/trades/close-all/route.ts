@@ -8,6 +8,7 @@ import { closePosition as mt5ClosePosition } from '@/lib/mt5-client'
 import { requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { apiCatch } from '@/lib/api-handler'
+import { closeAllSchema, validateBody } from '@/lib/validations'
 import { auditTrade } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -36,14 +37,17 @@ export async function POST(req: NextRequest) {
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
 
+  const body = await req.json().catch(() => ({}))
+  const parsed = validateBody(closeAllSchema, body)
+  if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
+
   try {
-    const body = await req.json().catch(() => ({}))
-    const reason = body?.reason || 'manual-close-all'
+    const reason = parsed.data.reason || 'manual-close-all'
 
     // Resolve account
     let account = null
-    if (body?.accountId) {
-      account = await db.account.findUnique({ where: { id: body.accountId } })
+    if (parsed.data.accountId) {
+      account = await db.account.findUnique({ where: { id: parsed.data.accountId } })
     } else {
       account = await db.account.findFirst({ where: { isDefault: true } })
     }

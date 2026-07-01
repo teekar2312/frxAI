@@ -4,6 +4,8 @@ import { sendWebhook } from '@/lib/webhook'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { audit } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { alertUpdateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,19 +13,19 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.alertManage)
+  if (limited) return limited
+
   try {
     const { id } = await params
-    const body = await req.json().catch(() => ({}))
-    const data: any = {}
-    if (body?.active !== undefined) data.active = !!body.active
-    if (body?.triggered !== undefined) data.triggered = !!body.triggered
-    if (body?.triggeredAt !== undefined) {
-      data.triggeredAt = body.triggeredAt ? new Date(body.triggeredAt) : null
-    }
+    const body = await req.json()
+    const result = validateBody(alertUpdateSchema, body)
+    if (!result.success) return result.error
+    const data = result.data
 
     // When marking as triggered, also fire a webhook so the user is notified
     // on all their channels (Discord/Telegram/Slack) — best-effort, never throws.
-    if (body?.triggered === true) {
+    if (data.triggered === true) {
       try {
         const alert = await db.alert.findUnique({ where: { id } })
         if (alert) {
@@ -72,6 +74,9 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.alertManage)
+  if (limited) return limited
+
   try {
     const { id } = await params
     await db.alert.delete({ where: { id } })

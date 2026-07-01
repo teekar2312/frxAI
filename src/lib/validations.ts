@@ -118,8 +118,74 @@ export const killSwitchSchema = z.object({
 export const mt5ConnectSchema = z.object({
   login: z.number().int().positive(),
   server: z.string().min(1).max(200),
-  password: z.string().min(1),
+  password: z.string().min(1).max(200),
   accountId: z.string().optional(),
+})
+
+// Log creation
+export const logCreateSchema = z.object({
+  level: z.enum(['info', 'warn', 'error']),
+  source: z.string().min(1).max(50),
+  message: z.string().min(1).max(5000),
+  stack: z.string().max(10000).optional().nullable(),
+  context: z.unknown().optional().nullable(),
+})
+
+// User update (admin — role/active/name)
+export const userUpdateSchema = z.object({
+  role: z.enum(['admin', 'trader', 'viewer']).optional(),
+  active: z.boolean().optional(),
+  name: z.string().min(1).max(100).optional(),
+})
+
+// Password reset (admin resets another user's password)
+export const passwordResetSchema = z.object({
+  password: z.string().min(6).max(128),
+})
+
+// Trade update (SL/TP/trailing/comment on open trade)
+export const tradeUpdateSchema = z.object({
+  stopLoss: z.number().positive().optional().nullable(),
+  takeProfit: z.number().positive().optional().nullable(),
+  trailingStop: z.boolean().optional(),
+  trailingPips: z.number().min(0).max(500).optional(),
+  comment: z.string().max(500).optional().nullable(),
+})
+
+// Trade notes (journal comment)
+export const tradeNotesSchema = z.object({
+  comment: z.string().max(500).optional().nullable(),
+})
+
+// Alert update (active/triggered/triggeredAt)
+export const alertUpdateSchema = z.object({
+  active: z.boolean().optional(),
+  triggered: z.boolean().optional(),
+  triggeredAt: z.string().datetime().optional().nullable(),
+})
+
+// Indicator update (enabled/autoManaged/weight)
+export const indicatorUpdateSchema = z.object({
+  enabled: z.boolean().optional(),
+  autoManaged: z.boolean().optional(),
+  weight: z.number().min(0).max(100).optional(),
+})
+
+// Backtest optimize
+export const backtestOptimizeSchema = z.object({
+  periodFrom: z.string().datetime().optional(),
+  periodTo: z.string().datetime().optional(),
+  initialCapital: z.number().min(100).max(10_000_000).optional().default(10000),
+})
+
+// MT5 reconcile
+export const reconcileSchema = z.object({
+  accountId: z.string().optional(),
+})
+
+// AI evaluate
+export const aiEvaluateSchema = z.object({
+  signalId: z.string().optional(),
 })
 
 // Helper to validate and return parsed data or error response

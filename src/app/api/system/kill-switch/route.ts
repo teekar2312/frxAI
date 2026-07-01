@@ -8,6 +8,7 @@ import { bidAsk, calcPnl } from '@/lib/market'
 import { requireTrader } from '@/lib/auth-server'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { apiCatch } from '@/lib/api-handler'
+import { killSwitchSchema, validateBody } from '@/lib/validations'
 import { auditRisk } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
@@ -40,9 +41,12 @@ export async function POST(req: NextRequest) {
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
 
+  const body = await req.json().catch(() => ({}))
+  const parsed = validateBody(killSwitchSchema, body)
+  if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
+
   try {
-    const body = await req.json().catch(() => ({}))
-    const reason = body?.reason || 'emergency-kill-switch'
+    const reason = parsed.data.reason || 'emergency-kill-switch'
     const triggeredBy = user.email
 
     // ── 1. Disable auto-trading IMMEDIATELY ────────────────────────────────────
@@ -57,8 +61,8 @@ export async function POST(req: NextRequest) {
 
     // ── 2. Resolve account ─────────────────────────────────────────────────────
     let account = null
-    if (body?.accountId) {
-      account = await db.account.findUnique({ where: { id: body.accountId } })
+    if (parsed.data.accountId) {
+      account = await db.account.findUnique({ where: { id: parsed.data.accountId } })
     } else {
       account = await db.account.findFirst({ where: { isDefault: true } })
     }

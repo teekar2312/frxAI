@@ -4,6 +4,7 @@ import { evaluatePendingSignals, evaluateSignalOutcome } from '@/lib/ai-evaluati
 import { apiCatch } from '@/lib/api-handler'
 import { audit } from '@/lib/audit'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { aiEvaluateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,9 +28,12 @@ export async function POST(req: NextRequest) {
   const limited = applyRateLimit(req, RATE_LIMITS.aiEvaluate)
   if (limited) return limited
 
+  const body = await req.json().catch(() => ({}))
+  const parsed = validateBody(aiEvaluateSchema, body)
+  if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
+
   try {
-    const body = await req.json().catch(() => ({}))
-    const signalId = body?.signalId
+    const signalId = parsed.data.signalId
 
     if (signalId) {
       // Evaluate single signal

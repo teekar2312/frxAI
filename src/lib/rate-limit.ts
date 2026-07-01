@@ -224,4 +224,26 @@ export const RATE_LIMITS = {
   tradeMoveToBE: { key: 'trade-move-to-be', max: 20, windowSec: 60 },
   /** User update/delete: 10 per minute per IP */
   userManage: { key: 'user-manage', max: 10, windowSec: 60 },
+  /** Log create: 30 per minute per IP */
+  logCreate: { key: 'log-create', max: 30, windowSec: 60 },
+  /** Log purge (DELETE all): 2 per hour per IP */
+  logPurge: { key: 'log-purge', max: 2, windowSec: 3600 },
+  /** MT5 connect: 5 per minute per IP (sends credentials) */
+  mt5Connect: { key: 'mt5-connect', max: 5, windowSec: 60 },
+  /** MT5 disconnect: 10 per minute per IP */
+  mt5Disconnect: { key: 'mt5-disconnect', max: 10, windowSec: 60 },
+  /** Alert update/delete: 20 per minute per IP */
+  alertManage: { key: 'alert-manage', max: 20, windowSec: 60 },
+  /** Trade note update: 20 per minute per IP */
+  tradeNote: { key: 'trade-note', max: 20, windowSec: 60 },
+  /** Indicator update: 30 per minute per IP */
+  indicatorUpdate: { key: 'indicator-update', max: 30, windowSec: 60 },
+  /** Order cancel: 20 per minute per IP */
+  orderCancel: { key: 'order-cancel', max: 20, windowSec: 60 },
+  /** Webhook test: 5 per minute per IP */
+  webhookTest: { key: 'webhook-test', max: 5, windowSec: 60 },
+  /** Backup delete: 5 per minute per IP */
+  backupDelete: { key: 'backup-delete', max: 5, windowSec: 60 },
+  /** MT5 reconcile: 10 per minute per IP */
+  reconcile: { key: 'reconcile', max: 10, windowSec: 60 },
 } as const

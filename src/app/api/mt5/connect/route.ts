@@ -3,6 +3,8 @@ import { connectMT5, disconnectMT5 } from '@/lib/mt5-client'
 import { db } from '@/lib/db'
 import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { mt5ConnectSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,16 +17,14 @@ export const dynamic = 'force-dynamic'
  * so subsequent operations know which bridge session to use.
  */
 export async function POST(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.mt5Connect)
+  if (limited) return limited
+
   try {
     const body = await req.json()
-    const { login, server, password, accountId } = body || {}
-
-    if (!login || !server || !password) {
-      return NextResponse.json(
-        { error: 'login, server, password are required' },
-        { status: 400 },
-      )
-    }
+    const parsed = validateBody(mt5ConnectSchema, body)
+    if (parsed.error) return parsed.error
+    const { login, server, password, accountId } = parsed.data
 
     const account = await connectMT5({ login: Number(login), server, password })
 
@@ -63,6 +63,9 @@ export async function POST(req: NextRequest) {
  * Disconnects the MT5 bridge session for the given login.
  */
 export async function DELETE(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.mt5Disconnect)
+  if (limited) return limited
+
   try {
     const { searchParams } = new URL(req.url)
     const login = Number(searchParams.get('login'))

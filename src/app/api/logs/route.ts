@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { logCreateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,15 +29,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.logCreate)
+  if (limited) return limited
+
   try {
     const body = await req.json().catch(() => ({}))
-    const { level, source, message, stack, context } = body || {}
-    if (!level || !source || !message) {
-      return NextResponse.json(
-        { error: 'level, source, message are required' },
-        { status: 400 },
-      )
-    }
+    const parsed = validateBody(logCreateSchema, body)
+    if (parsed.error) return parsed.error
+    const { level, source, message, stack, context } = parsed.data
+
     const log = await db.log.create({
       data: {
         level,
@@ -51,7 +53,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const limited = applyRateLimit(req, RATE_LIMITS.logPurge)
+  if (limited) return limited
+
   try {
     await db.log.deleteMany({})
     return NextResponse.json({ ok: true })

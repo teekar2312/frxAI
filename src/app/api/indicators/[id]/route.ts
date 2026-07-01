@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
+import { indicatorUpdateSchema, validateBody } from '@/lib/validations'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +10,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.indicatorUpdate)
+  if (limited) return limited
+
   try {
     const { id } = await params
     const body = await req.json()
@@ -17,10 +22,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Indicator not found' }, { status: 404 })
     }
 
-    const data: Record<string, unknown> = {}
-    if (body.enabled != null) data.enabled = Boolean(body.enabled)
-    if (body.autoManaged != null) data.autoManaged = Boolean(body.autoManaged)
-    if (body.weight != null) data.weight = Number(body.weight)
+    const result = validateBody(indicatorUpdateSchema, body)
+    if (!result.success) return result.error
+    const data = result.data
 
     const indicator = await db.indicator.update({ where: { id }, data })
     return NextResponse.json({ indicator })

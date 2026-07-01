@@ -4,13 +4,17 @@ import { logInfo } from '@/lib/logger'
 import { requireTrader } from '@/lib/auth-server'
 import { apiCatch } from '@/lib/api-handler'
 import { audit } from '@/lib/audit'
+import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = applyRateLimit(req, RATE_LIMITS.orderCancel)
+  if (limited) return limited
+
   // Only trader+ can cancel orders (viewer cannot)
   const user = await requireTrader()
   if (user instanceof NextResponse) return user
@@ -32,6 +36,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true })
   } catch (e) {
-    return apiCatch(e, 'orders', 'DELETE', _req)
+    return apiCatch(e, 'orders', 'DELETE', req)
   }
 }
