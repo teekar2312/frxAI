@@ -9,6 +9,14 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
+
+    // Check if client wants stats instead of logs
+    if (searchParams?.get('stats') === 'true') {
+      const { getLogStats } = await import('@/lib/log-cleanup')
+      const stats = await getLogStats()
+      return NextResponse.json(stats)
+    }
+
     const level = searchParams.get('level') || undefined
     const source = searchParams.get('source') || undefined
     const limit = parseInt(searchParams.get('limit') || '200', 10)

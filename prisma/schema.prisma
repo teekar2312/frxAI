@@ -71,6 +71,9 @@ model Trade {
   @@index([symbol])
   @@index([status])
   @@index([mt5Ticket])
+  @@index([source])
+  @@index([openTime])
+  @@index([accountId, status])
 }
 
 // ===== Pending Orders =====
@@ -155,9 +158,8 @@ model Log {
   context       String?  // JSON
   createdAt     DateTime @default(now())
 
-  @@index([level])
   @@index([source])
-  @@index([createdAt])
+  @@index([level, createdAt])
 }
 
 // ===== Backtest Results =====
@@ -255,6 +257,7 @@ model Notification {
 
   @@index([type])
   @@index([createdAt])
+  @@index([recipient])
 }
 
 // ===== System Config (broker, API keys, email) =====

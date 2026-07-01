@@ -1,3 +1,7 @@
+// Validate environment variables at startup
+import { validateEnv } from '@/lib/env-validation'
+validateEnv()
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";

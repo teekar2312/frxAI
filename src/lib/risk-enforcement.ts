@@ -72,6 +72,7 @@ export interface EnforcementResult {
     marginCallLevel: number
     balance: number
     freeMargin: number
+    pendingOrders: number
   }
 }
 
@@ -112,7 +113,7 @@ export async function enforceTradeOpen(params: {
         dailyPnlPct: 0, dailyRiskLimitPct: cfg.dailyRiskLimitPct,
         tradeRiskPct: 0, maxRiskPerTradePct: cfg.maxRiskPerTradePct,
         marginLevel: 0, marginCallLevel: cfg.marginCallLevel,
-        balance: 0, freeMargin: 0,
+        balance: 0, freeMargin: 0, pendingOrders: 0,
       },
     }
   }
@@ -131,14 +132,18 @@ export async function enforceTradeOpen(params: {
         dailyPnlPct: 0, dailyRiskLimitPct: cfg.dailyRiskLimitPct,
         tradeRiskPct: 0, maxRiskPerTradePct: cfg.maxRiskPerTradePct,
         marginLevel: 0, marginCallLevel: cfg.marginCallLevel,
-        balance: 0, freeMargin: 0,
+        balance: 0, freeMargin: 0, pendingOrders: 0,
       },
     }
   }
 
-  // ── Fetch open trades + today's closed trades ─────────────────────────────
+  // ── Fetch open trades + pending orders + today's closed trades ─────────────────
   const openTrades = await db.trade.findMany({
     where: { accountId: params.accountId, status: 'open' },
+  })
+
+  const pendingOrders = await db.order.findMany({
+    where: { accountId: params.accountId, status: 'pending' },
   })
 
   const now = new Date()
@@ -150,7 +155,8 @@ export async function enforceTradeOpen(params: {
 
   // ── Compute context values ────────────────────────────────────────────────
   const openPositions = openTrades.length
-  const totalLot = openTrades.reduce((s, t) => s + t.lotSize, 0)
+  const totalLot = openTrades.reduce((s, t) => s + t.lotSize, 0) +
+    pendingOrders.reduce((s, o) => s + o.lotSize, 0)
   const dailyPnl = todayClosed.reduce((s, t) => s + (t.pnl || 0), 0)
   const balance = account.balance || 0
   const dailyPnlPct = balance > 0 ? (dailyPnl / balance) * 100 : 0
@@ -186,12 +192,21 @@ export async function enforceTradeOpen(params: {
     marginCallLevel: cfg.marginCallLevel,
     balance,
     freeMargin,
+    pendingOrders: pendingOrders.length,
   }
 
   // ── 2. Max open positions ─────────────────────────────────────────────────
   if (openPositions >= cfg.maxOpenPositions) {
     violations.push(
       `Max open positions exceeded: ${openPositions}/${cfg.maxOpenPositions}. Close existing positions first.`,
+    )
+  }
+
+  // ── 2b. Max pending orders ─────────────────────────────────────────────────
+  const MAX_PENDING_ORDERS = 20
+  if (pendingOrders.length >= MAX_PENDING_ORDERS) {
+    violations.push(
+      `Max pending orders reached: ${pendingOrders.length}/${MAX_PENDING_ORDERS}. Cancel pending orders first.`,
     )
   }
 

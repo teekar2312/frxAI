@@ -10,6 +10,7 @@ import 'server-only'
 
 const BRIDGE_URL = process.env.MT5_BRIDGE_URL || 'http://localhost:3050'
 const REQUEST_TIMEOUT_MS = 4000
+const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY || 'frxai-bridge-key-dev-only'
 
 export interface MT5AccountInfo {
   login: number
@@ -81,7 +82,14 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs =
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    return await fetch(url, { ...init, signal: controller.signal })
+    return await fetch(url, {
+      ...init,
+      headers: {
+        'X-Bridge-Key': BRIDGE_API_KEY,
+        ...(init.headers as Record<string, string> || {}),
+      },
+      signal: controller.signal
+    })
   } finally {
     clearTimeout(timer)
   }

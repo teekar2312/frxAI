@@ -12,15 +12,30 @@ export const dynamic = 'force-dynamic'
  * Does NOT require authentication (public endpoint for monitoring tools).
  */
 export async function GET() {
-  const checks: Record<string, { status: 'ok' | 'error'; latency?: number; detail?: string }> = {}
+  const checks: Record<string, any> = {}
   let allOk = true
 
-  // 1. Database check
+  // 1. Database check + latency + error count + log size
   try {
     const dbStart = Date.now()
     await db.$queryRaw`SELECT 1`
-    const dbLatency = Date.now() - dbStart
-    checks.database = { status: 'ok', latency: dbLatency }
+    const dbLatencyMs = Date.now() - dbStart
+
+    // Recent error count (last hour)
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000)
+    const recentErrors = await db.log.count({
+      where: { level: 'error', createdAt: { gte: oneHourAgo } },
+    })
+
+    // Log table size
+    const logCount = await db.log.count()
+
+    checks.database = {
+      status: 'ok',
+      latencyMs,
+      logCount,
+      recentErrors,
+    }
   } catch (e: any) {
     checks.database = { status: 'error', detail: e?.message }
     allOk = false

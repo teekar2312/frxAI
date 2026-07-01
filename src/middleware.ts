@@ -14,10 +14,11 @@ export const config = {
   // - /api/mt5/reconcile (called by background service, has own auth)
   // - /api/ai/evaluate (called by background service, has own auth)
   // - /api/system/backup (called by background service for auto-backup)
+  // - /api/logs/cleanup (called by background service for log retention)
   // - /login (the login page itself)
   // - /_next/* (Next.js static assets)
   // - /favicon.ico, /logo.svg (public assets)
   matcher: [
-    '/((?!api/auth|api/mt5/health|api/health|api/trades/check-sl-tp|api/ai/auto-trade|api/mt5/reconcile|api/ai/evaluate|api/system/backup|login|_next/static|_next/image|favicon.ico|logo.svg|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!api/auth|api/mt5/health|api/health|api/trades/check-sl-tp|api/ai/auto-trade|api/mt5/reconcile|api/ai/evaluate|api/system/backup|api/logs/cleanup|login|_next/static|_next/image|favicon.ico|logo.svg|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 }

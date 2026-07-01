@@ -24,10 +24,12 @@
 // No port needed — this is a polling worker, not a server.
 
 const API_BASE = 'http://localhost:3000'
+const SERVICE_KEY = process.env.SERVICE_API_KEY || 'frxai-service-key-dev-only-change-in-prod'
 const POLL_INTERVAL_MS = 5000 // 5 seconds — SL/TP check cadence
 const RECONCILE_INTERVAL_MS = 30_000 // 30 seconds — reconciliation cadence
 const EVALUATE_INTERVAL_MS = 5 * 60_000 // 5 minutes — AI signal evaluation
 const BACKUP_INTERVAL_MS = 60 * 60_000 // 1 hour — database backup
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60_000 // 6 hours — log cleanup
 const API_TIMEOUT_MS = 8000
 
 interface CheckResult {
@@ -83,7 +85,7 @@ async function checkSlTp(): Promise<CheckResult | null> {
   try {
     const res = await fetchWithTimeout(`${API_BASE}/api/trades/check-sl-tp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY },
       body: JSON.stringify({ source: 'server-cron' }),
     }, API_TIMEOUT_MS)
 
@@ -110,7 +112,7 @@ async function reconcilePositions(): Promise<ReconcileResult | null> {
   try {
     const res = await fetchWithTimeout(`${API_BASE}/api/mt5/reconcile`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY },
       body: JSON.stringify({}),
     }, API_TIMEOUT_MS)
 
@@ -132,7 +134,7 @@ async function evaluateSignals(): Promise<EvaluateResult | null> {
   try {
     const res = await fetchWithTimeout(`${API_BASE}/api/ai/evaluate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY },
       body: JSON.stringify({}),
     }, API_TIMEOUT_MS)
 
@@ -154,7 +156,7 @@ async function backupDatabase(): Promise<BackupResult | null> {
   try {
     const res = await fetchWithTimeout(`${API_BASE}/api/system/backup`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY },
     }, 30_000) // 30s timeout for backup (file copy can take time)
 
     if (!res.ok) {
@@ -230,12 +232,32 @@ function logBackupResult(result: BackupResult): void {
   console.log('')
 }
 
+async function cleanupLogs(): Promise<void> {
+  try {
+    const res = await fetchWithTimeout(`${API_BASE}/api/logs/cleanup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }, API_TIMEOUT_MS)
+    if (res.ok) {
+      const data = await res.json() as { deleted: number }
+      if (data.deleted > 0) {
+        console.log(`[${new Date().toISOString()}] 🧹 Log cleanup: ${data.deleted} old logs deleted`)
+      }
+    }
+  } catch (e: any) {
+    if (e?.code !== 'ECONNREFUSED' && e?.name !== 'AbortError') {
+      console.error(`[${new Date().toISOString()}] log cleanup error:`, e?.message || e)
+    }
+  }
+}
+
 async function runMonitorLoop(): Promise<void> {
   console.log(`[${new Date().toISOString()}] 🤖 FinexFX SL/TP Monitor started`)
   console.log(`[${new Date().toISOString()}]    SL/TP check: every ${POLL_INTERVAL_MS / 1000}s`)
   console.log(`[${new Date().toISOString()}]    Reconciliation: every ${RECONCILE_INTERVAL_MS / 1000}s`)
   console.log(`[${new Date().toISOString()}]    AI evaluation: every ${EVALUATE_INTERVAL_MS / 60_000} min`)
   console.log(`[${new Date().toISOString()}]    DB backup: every ${BACKUP_INTERVAL_MS / 60_000} min`)
+  console.log(`[${new Date().toISOString()}]    Log cleanup: every ${CLEANUP_INTERVAL_MS / 60_000 / 60} hours`)
   console.log(`[${new Date().toISOString()}]    Target: ${API_BASE}`)
   console.log('')
 
@@ -243,6 +265,7 @@ async function runMonitorLoop(): Promise<void> {
   let lastReconcile = 0
   let lastEvaluate = 0
   let lastBackup = 0
+  let lastCleanup = 0
   let lastHeartbeat = Date.now()
 
   while (true) {
@@ -279,6 +302,12 @@ async function runMonitorLoop(): Promise<void> {
         logBackupResult(backupResult)
       }
       lastBackup = now
+    }
+
+    // ── 5. Log cleanup (every 6 hours) ──────────────────────────────────────────
+    if (now - lastCleanup >= CLEANUP_INTERVAL_MS) {
+      await cleanupLogs()
+      lastCleanup = now
     }
 
     // ── Heartbeat (every 5 min) ────────────────────────────────────────────────

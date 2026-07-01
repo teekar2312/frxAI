@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireServiceAuth } from '@/lib/service-auth'
 import { requireAuth } from '@/lib/auth-server'
 import { reconcileAccountPositions, reconcileAllAccounts } from '@/lib/reconciliation'
 import { db } from '@/lib/db'
@@ -24,6 +25,9 @@ export const dynamic = 'force-dynamic'
  * Available to all authenticated users (read-only reconciliation is safe).
  */
 export async function POST(req: NextRequest) {
+  const authErr = requireServiceAuth(req)
+  if (authErr) return authErr
+
   const user = await requireAuth()
   if (user instanceof NextResponse) return user
 

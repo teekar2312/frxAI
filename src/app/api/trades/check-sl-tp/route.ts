@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { requireServiceAuth } from '@/lib/service-auth'
 import { db } from '@/lib/db'
 import { bidAsk, calcPnl } from '@/lib/market'
 import { logInfo, sendNotification } from '@/lib/logger'
@@ -15,7 +16,10 @@ export const dynamic = 'force-dynamic'
 // Each trade close is atomic (conditional update prevents double-close if
 // manual close happened between the fetch and the update). Returns a summary
 // of actions taken.
-export async function POST() {
+export async function POST(req: NextRequest) {
+  const authErr = requireServiceAuth(req as any)
+  if (authErr) return authErr
+
   const closed: any[] = []
   const trailed: any[] = []
   const skipped: any[] = []

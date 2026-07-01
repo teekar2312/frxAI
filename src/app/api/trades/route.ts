@@ -163,33 +163,40 @@ export async function POST(req: NextRequest) {
     // Round-turn commission: $2.5/lot x 2 sides
     const commission = Number((lot * 2.5 * 2).toFixed(2))
 
-    const trade = await db.trade.create({
-      data: {
-        accountId,
-        symbol,
-        side,
-        lotSize: lot,
-        openPrice,
-        closePrice: null,
-        stopLoss: sl,
-        takeProfit: tp,
-        trailingStop: Boolean(trailingStop ?? false),
-        trailingPips: trailingPips != null ? Number(trailingPips) : 0,
-        status: 'open',
-        pnl: 0,
-        pips: 0,
-        commission,
-        swap: 0,
-        strategy: 'scalping-m5',
-        timeframe: 'M5',
-        source: source ? String(source) : 'manual',
-        comment: comment ? String(comment) : null,
-        mt5Ticket,
-        mt5Server,
-        openTime: new Date(),
-        closeTime: null,
-      },
-    })
+    // Create trade + update margin atomically
+    const [trade] = await db.$transaction([
+      db.trade.create({
+        data: {
+          accountId,
+          symbol,
+          side,
+          lotSize: lot,
+          openPrice,
+          closePrice: null,
+          stopLoss: sl,
+          takeProfit: tp,
+          trailingStop: Boolean(trailingStop ?? false),
+          trailingPips: trailingPips != null ? Number(trailingPips) : 0,
+          status: 'open',
+          pnl: 0,
+          pips: 0,
+          commission,
+          swap: 0,
+          strategy: 'scalping-m5',
+          timeframe: 'M5',
+          source: source ? String(source) : 'manual',
+          comment: comment ? String(comment) : null,
+          mt5Ticket,
+          mt5Server,
+          openTime: new Date(),
+          closeTime: null,
+        },
+      }),
+      db.account.update({
+        where: { id: accountId },
+        data: { margin: { increment: lot * 1000 } },
+      }),
+    ])
 
     await logInfo(
       'mt5',

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireServiceAuth } from '@/lib/service-auth'
 import { requireAuth } from '@/lib/auth-server'
 import { evaluatePendingSignals, evaluateSignalOutcome } from '@/lib/ai-evaluation'
 import { apiCatch } from '@/lib/api-handler'
@@ -21,6 +22,9 @@ export const dynamic = 'force-dynamic'
  * Returns summary of evaluation results.
  */
 export async function POST(req: NextRequest) {
+  const authErr = requireServiceAuth(req)
+  if (authErr) return authErr
+
   const user = await requireAuth()
   if (user instanceof NextResponse) return user
 

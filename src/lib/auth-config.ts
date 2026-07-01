@@ -2,6 +2,7 @@
 // Session strategy: JWT (stateless, no session table needed for reads).
 // The User model in Prisma stores email + bcrypt passwordHash + role.
 
+import { randomBytes } from 'crypto'
 import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { authenticateUser, type SafeUser } from './auth'
@@ -152,7 +153,33 @@ export const authOptions: NextAuthOptions = {
     signIn: '/login',
   },
 
-  // Secret is read from NEXTAUTH_SECRET env var (auto-generated if missing).
-  // In production, set NEXTAUTH_SECRET to a stable random string (>= 32 chars).
-  secret: process.env.NEXTAUTH_SECRET || 'finexfx-dev-secret-change-in-production-please-32chars',
+  // Secret is read from NEXTAUTH_SECRET env var.
+  // In development, a random secret is auto-generated and persisted in .env.local.
+  // In production, NEXTAUTH_SECRET MUST be set (>= 32 chars) or the app refuses to start.
+  // NEVER hardcode a secret in source code — it would allow JWT token forgery.
+  secret: (() => {
+    const secret = process.env.NEXTAUTH_SECRET
+    if (!secret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          '[FATAL] NEXTAUTH_SECRET is not set. In production, you MUST set a stable random string (>= 32 chars) in your environment. Generate one with: openssl rand -base64 32'
+        )
+      }
+      // Dev: generate a random secret and warn
+      const devSecret = randomBytes(32).toString('base64url')
+      console.warn(
+        `\n⚠️  [AUTH] NEXTAUTH_SECRET not set — generated a DEV-ONLY secret.\n` +
+        `    This secret changes on every restart. For persistent dev sessions,\n` +
+        `    add this to your .env.local file:\n` +
+        `    NEXTAUTH_SECRET=${devSecret}\n`
+      )
+      return devSecret
+    }
+    if (secret.length < 32 && process.env.NODE_ENV === 'production') {
+      throw new Error(
+        `[FATAL] NEXTAUTH_SECRET is too short (${secret.length} chars). Must be >= 32 chars in production.`
+      )
+    }
+    return secret
+  })(),
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { requireServiceAuth } from '@/lib/service-auth'
 import { requireAdmin } from '@/lib/auth-server'
 import { backupDatabase, listBackups, deleteBackup, getBackupStats } from '@/lib/db-backup'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
@@ -43,6 +44,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const authErr = requireServiceAuth(req)
+  if (authErr) return authErr
+
   // Rate limit: max 3 manual backups per hour (prevent abuse)
   const limited = applyRateLimit(req, { key: 'manual-backup', max: 3, windowSec: 3600 })
   if (limited) return limited

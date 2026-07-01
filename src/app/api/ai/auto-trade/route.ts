@@ -176,38 +176,38 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 9. Create the trade record
-      const trade = await db.trade.create({
-        data: {
-          accountId: account.id,
-          symbol,
-          side,
-          lotSize: lot,
-          openPrice: finalOpenPrice,
-          stopLoss: Number(stopLoss.toFixed(5)),
-          takeProfit: Number(takeProfit.toFixed(5)),
-          trailingStop: false,
-          trailingPips: 0,
-          status: 'open',
-          pnl: 0,
-          pips: 0,
-          commission,
-          swap: 0,
-          strategy: 'scalping-m5',
-          timeframe: 'M5',
-          source: 'ai',
-          comment: `Auto: signal ${latestSignal.confidence}% ${latestSignal.direction}`,
-          mt5Ticket,
-          mt5Server,
-          openTime: new Date(),
-        },
-      })
-
-      // Update account margin
-      await db.account.update({
-        where: { id: account.id },
-        data: { margin: { increment: lot * 1000 } },
-      })
+      // Create trade + update margin atomically
+      const [trade] = await db.$transaction([
+        db.trade.create({
+          data: {
+            accountId: account.id,
+            symbol,
+            side,
+            lotSize: lot,
+            openPrice: finalOpenPrice,
+            stopLoss: Number(stopLoss.toFixed(5)),
+            takeProfit: Number(takeProfit.toFixed(5)),
+            trailingStop: false,
+            trailingPips: 0,
+            status: 'open',
+            pnl: 0,
+            pips: 0,
+            commission,
+            swap: 0,
+            strategy: 'scalping-m5',
+            timeframe: 'M5',
+            source: 'ai',
+            comment: `Auto: signal ${latestSignal.confidence}% ${latestSignal.direction}`,
+            mt5Ticket,
+            mt5Server,
+            openTime: new Date(),
+          },
+        }),
+        db.account.update({
+          where: { id: account.id },
+          data: { margin: { increment: lot * 1000 } },
+        }),
+      ])
 
       // Add to open trades list so next iteration sees it
       openTrades.push(trade as any)
