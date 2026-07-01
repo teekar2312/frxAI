@@ -2,7 +2,8 @@
 // Redirects unauthenticated users to /login.
 // For API routes, returns 401 JSON instead of redirecting.
 
-export { default } from 'next-auth/middleware'
+import { withAuth } from 'next-auth/middleware'
+export default withAuth
 
 export const config = {
   // Protect everything EXCEPT:
