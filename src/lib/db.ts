@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client'
 
 // Versioned cache key — bump when schema changes to force a fresh client
 // that includes newly-added models (avoids stale PrismaClient in dev HMR).
-const DB_CACHE_VERSION = 'v2'
+const DB_CACHE_VERSION = 'v3'
 
 const globalForPrisma = globalThis as unknown as {
   prismaClients: Record<string, PrismaClient> | undefined
