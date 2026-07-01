@@ -5,6 +5,34 @@ Semua perubahan penting pada proyek frxAI akan didokumentasikan di file ini.
 Format ini didasarkan pada [Keep a Changelog](https://keepachangelog.com/),
 dan proyek ini mematuhi [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2025-07-03
+
+### Diubah
+- **Database: SQLite → MySQL** — Provider Prisma diubah dari `sqlite` ke `mysql`
+- Schema Prisma: ditambahkan `@db.Text` dan `@db.LongText` untuk field yang melebihi `VARCHAR(191)`
+- `src/lib/db-backup.ts` di-rewrite lengkap: file copy → `mysqldump`
+- `src/lib/api-handler.ts` dan `src/lib/env-validation.ts` diperbarui untuk MySQL
+- `.env.example` format `DATABASE_URL` diubah ke `mysql://user:pass@host:3306/dbname`
+- SQLite migrations dihapus (gunakan `prisma db push` untuk MySQL)
+
+### Ditambahkan
+- `mysql2@3.22.5` sebagai MySQL driver untuk Prisma
+- `serverExternalPackages` di `next.config.ts` agar Prisma tidak di-bundle oleh Turbopack
+- `predev` script agar `prisma generate` otomatis sebelum dev server
+- `postinstall` script untuk auto `prisma generate` saat `bun install`
+- `scripts/fresh-setup.js` — cross-platform fresh install script
+- `fresh-setup.bat` — one-click Windows setup (double-click)
+- `setup` dan `dev:fresh` npm scripts
+- Prisma generated client output ke `src/generated/prisma/` (gitignored)
+- `DEPLOYMENT.md` — panduan deployment production
+- `SECURITY.md` — kebijakan keamanan dan vulnerability reporting
+- `CONTRIBUTING.md` — panduan kontribusi dan coding standards
+
+### Diperbaiki
+- Prisma client hash mismatch error pada Windows/Turbopack (`Cannot find module @prisma/client-xxx`)
+- Prisma version pinned ke `6.19.2` untuk mencegah hash mismatch antar environment
+- DB cache version bumped ke `v3` untuk force fresh PrismaClient
+
 ## [1.1.1] - 2025-07-02
 
 ### Ditambahkan
@@ -77,7 +105,8 @@ dan proyek ini mematuhi [Semantic Versioning](https://semver.org/).
 - 45 screenshot dokumentasi dipindahkan ke direktori `docs/`
 - `package.json` di-rename menjadi `frxai` v1.0.0
 
-[1.1.1]: https://github.com/finexfx/frxAI/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/finexfx/frxAI/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/finexfx/frxAI/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/finexfx/frxAI/releases/tag/v1.0.0
+[1.2.0]: https://github.com/teekar2312/frxAI/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/teekar2312/frxAI/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/teekar2312/frxAI/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/teekar2312/frxAI/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/teekar2312/frxAI/releases/tag/v1.0.0

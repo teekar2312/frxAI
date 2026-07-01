@@ -6,6 +6,7 @@ AI-powered Forex trading dashboard dengan analisis teknikal otomatis, news senti
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Prisma](https://img.shields.io/badge/Prisma-6-2D3748?logo=prisma&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ## Fitur Utama
@@ -37,7 +38,7 @@ AI-powered Forex trading dashboard dengan analisis teknikal otomatis, news senti
 | UI | React | 19 |
 | Styling | Tailwind CSS + shadcn/ui | 4 |
 | Bahasa | TypeScript | 5 |
-| Database | Prisma ORM + SQLite | 6 |
+| Database | MySQL + Prisma ORM | 8 / 6 |
 | Runtime | Bun | latest |
 | Auth | NextAuth.js (JWT) | v4 |
 | State | Zustand (client) + TanStack Query (server) | 5 / 5 |
@@ -96,6 +97,7 @@ AI-powered Forex trading dashboard dengan analisis teknikal otomatis, news senti
 ### Prasyarat
 
 - [Bun](https://bun.sh/) v1.3+
+- [MySQL](https://dev.mysql.com/downloads/) 8.0+ (atau MariaDB 10.5+)
 - [Git](https://git-scm.com/)
 
 ### Instalasi
@@ -110,21 +112,37 @@ bun install
 
 # 3. Setup environment
 cp .env.example .env
-# Edit .env sesuai kebutuhan (lihat bagian Environment Variables)
+# Edit .env — set DATABASE_URL ke MySQL connection string Anda
 
-# 4. Setup database
+# 4. Buat database di MySQL
+mysql -u root -p -e "CREATE DATABASE frxai;"
+
+# 5. Push schema ke database
 bun run db:push
-bun run db:generate
 
-# 5. Seed user admin default
+# 6. Seed user admin default
 bun run seed:auth
 # Default: admin@finexfx.local / admin123
 
-# 6. Jalankan development server
+# 7. Jalankan development server
 bun run dev
 ```
 
 Buka `http://localhost:3000` di browser.
+
+### Fresh Setup (Jika Ada Masalah)
+
+Jika mengalami error Prisma setelah pull, jalankan:
+
+```bash
+# Linux / macOS
+node scripts/fresh-setup.js
+
+# Windows — double-click file ini di Explorer:
+fresh-setup.bat
+```
+
+Script ini menghapus `node_modules`, `.next`, dan `src/generated`, lalu menginstall ulang dan push schema ke MySQL.
 
 ### Mini-Services (Opsional)
 
@@ -144,11 +162,11 @@ cd mini-services/mt5-bridge && bun install
 
 | Variable | Required | Deskripsi | Default |
 |----------|----------|-----------|---------|
-| `DATABASE_URL` | Ya | URL database SQLite (absolute path) | `file:./db/frxai.db` |
+| `DATABASE_URL` | Ya | MySQL connection string | `mysql://root:password@localhost:3306/frxai` |
 | `NEXTAUTH_SECRET` | Prod | JWT secret (≥32 chars) | Auto-generated di dev |
 | `NEXTAUTH_URL` | Prod | Callback URL | `http://localhost:3000` |
-| `SERVICE_API_KEY` | Prod | Key untuk background service endpoints | `frxai-service-key-dev-only-...` |
-| `BRIDGE_API_KEY` | Prod | Key untuk MT5 bridge komunikasi | `frxai-bridge-key-dev-only` |
+| `SERVICE_API_KEY` | Prod | Key untuk background service endpoints | — |
+| `BRIDGE_API_KEY` | Prod | Key untuk MT5 bridge komunikasi | — |
 | `MT5_ADAPTER` | Tidak | `mock` atau `real-python` | `mock` |
 | `MT5_PYTHON_BRIDGE_URL` | Tidak | URL Python MT5 bridge | — |
 | `MT5_LOGIN` | Tidak | MT5 account login | — |
@@ -187,12 +205,14 @@ cd mini-services/mt5-bridge && bun install
 
 | Command | Deskripsi |
 |---------|-----------|
-| `bun run dev` | Jalankan development server (port 3000) |
+| `bun run dev` | Jalankan development server (port 3000), auto `prisma generate` |
 | `bun run build` | Build untuk production (standalone) |
 | `bun run start` | Jalankan production server |
-| `bun run lint` | ESLint check (0 errors target) |
+| `bun run lint` | ESLint check |
 | `bun run test` | Jalankan unit tests |
-| `bun run db:push` | Push schema ke database |
+| `bun run setup` | Fresh install — hapus node_modules/.next, reinstall, push schema |
+| `bun run dev:fresh` | Fresh install + langsung jalankan dev server |
+| `bun run db:push` | Push schema ke database MySQL |
 | `bun run db:generate` | Generate Prisma client |
 | `bun run db:migrate` | Jalankan migration |
 | `bun run db:reset` | Reset database |
@@ -203,8 +223,11 @@ cd mini-services/mt5-bridge && bun install
 | Dokumen | Path | Deskripsi |
 |---------|------|-----------|
 | **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) | Arsitektur sistem, stack, keamanan, deployment |
-| **API Reference** | [docs/API.md](docs/API.md) | 60+ endpoint API dengan request/response schema |
-| **Changelog** | [CHANGELOG.md](CHANGELOG.md) | Riwayat perubahan per versi (4 round improvements) |
+| **API Reference** | [docs/API.md](docs/API.md) | 65+ endpoint API dengan request/response schema |
+| **Changelog** | [CHANGELOG.md](CHANGELOG.md) | Riwayat perubahan per versi |
+| **Deployment** | [DEPLOYMENT.md](DEPLOYMENT.md) | Panduan deployment production (Docker, VPS, CI/CD) |
+| **Security** | [SECURITY.md](SECURITY.md) | Kebijakan keamanan dan vulnerability reporting |
+| **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) | Panduan kontribusi dan coding standards |
 | **MT5 Bridge** | [mini-services/mt5-bridge/README.md](mini-services/mt5-bridge/README.md) | Arsitektur & API reference MT5 bridge |
 
 ## Caddy Reverse Proxy
@@ -232,13 +255,11 @@ GET /                               →  localhost:3000 (Next.js, default)
 - **Log Retention**: Tiered cleanup (debug:3d, info:7d, warn:14d, error:30d)
 - **Env Validation**: Startup check untuk required env vars
 
+Lihat [SECURITY.md](SECURITY.md) untuk detail lengkap.
+
 ## Kontribusi
 
-1. Fork repository ini
-2. Buat branch fitur baru: `git checkout -b feature/fitur-baru`
-3. Commit perubahan: `git commit -m 'Add fitur baru'`
-4. Push ke branch: `git push origin feature/fitur-baru`
-5. Buat Pull Request
+Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk panduan kontribusi, coding standards, dan pull request process.
 
 ## Lisensi
 

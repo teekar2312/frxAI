@@ -1,6 +1,6 @@
 # Architecture — frxAI (FinexFX AI Trading System)
 
-> **Version:** 1.1.1  
+> **Version:** 1.2.0  
 > **Last updated:** July 2025
 
 ---
@@ -60,7 +60,7 @@ The system supports **4 currency pairs**: EUR/USD, USD/JPY, GBP/USD, XAU/USD (Go
 | **Data Fetching** | TanStack Query | 5.82.x | Server state management, caching, refetching |
 | **Real-time** | Socket.IO Client | 4.8.x | WebSocket price feed connection |
 | **ORM** | Prisma | 6.11.x | Type-safe database access |
-| **Database** | SQLite | bundled | Embedded relational database (zero-config) |
+| **Database** | MySQL | 8.x | Relational database server |
 | **Auth** | NextAuth | 4.24.x | Authentication (credentials provider, JWT sessions) |
 | **Validation** | Zod | 4.x | Schema-based input validation |
 | **Password** | bcryptjs | 3.x | Password hashing |
@@ -112,9 +112,9 @@ The system supports **4 currency pairs**: EUR/USD, USD/JPY, GBP/USD, XAU/USD (Go
                                │       │  └────────┘  │
                                ▼       └──────┬───────┘
                          ┌───────────┐         │
-                         │  SQLite   │         │
+                         │   MySQL   │         │
                          │ Database  │         │
-                         │ (.db)     │◄────────┘
+                         │  Server   │◄────────┘
                          └───────────┘     (no direct
                                             DB access)
 
@@ -141,7 +141,7 @@ The system supports **4 currency pairs**: EUR/USD, USD/JPY, GBP/USD, XAU/USD (Go
 ```
 Price Feed:  Socket.IO (3003) → Browser ← Caddy ← XTransformPort=3003
 MT5 Bridge:  Next.js (3000) → HTTP → MT5 Bridge (3050) + X-Bridge-Key
-SL/TP Check: Monitor Worker → POST /api/trades/check-sl-tp + X-Service-Key → Next.js → SQLite
+SL/TP Check: Monitor Worker → POST /api/trades/check-sl-tp + X-Service-Key → Next.js → MySQL
 Auth:       Browser → Caddy → Next.js → NextAuth JWT → Prisma User table
 ```
 
@@ -678,7 +678,7 @@ All requests include `X-Service-Key` for service-to-service authentication and u
 
 ## 10. Database Schema
 
-The system uses **SQLite** via Prisma ORM with **15 models**:
+The system uses **MySQL** via Prisma ORM with **15 models**:
 
 | # | Model | Purpose | Key Fields |
 |---|-------|---------|------------|
@@ -938,7 +938,7 @@ caddy run                                   # Port 81
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes (prod) | `file:./db/custom.db` | SQLite database path |
+| `DATABASE_URL` | Yes (prod) | `mysql://user:pass@localhost:3306/frxai` | MySQL connection string |
 | `NEXTAUTH_SECRET` | Yes (prod) | Auto-generated (dev) | JWT signing secret (≥32 chars) |
 | `NEXTAUTH_URL` | No | — | Canonical app URL |
 | `SERVICE_API_KEY` | Recommended | Dev default | Service-to-service auth key |
@@ -975,10 +975,10 @@ caddy run                                   # Port 81
 │  └──────────────────────┘                │
 │                                          │
 │  ┌──────────────────────┐                │
-│  │    SQLite File       │                │
-│  │    (custom.db)       │                │
+│  │    MySQL Server      │                │
+│  │    (port 3306)       │                │
 │  └──────────────────────┘                │
 └─────────────────────────────────────────┘
 ```
 
-All 4 Bun processes share read/write access to the same SQLite database file. SQLite's WAL mode (enabled by Prisma) allows concurrent reads with a single writer.
+All 4 Bun processes connect to the same MySQL server. MySQL's default transaction isolation (REPEATABLE READ) and row-level locking allow concurrent reads and writes across multiple connections.
