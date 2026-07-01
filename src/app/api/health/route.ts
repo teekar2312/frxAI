@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
  * Does NOT require authentication (public endpoint for monitoring tools).
  */
 export async function GET() {
-  const checks: Record<string, any> = {}
+  const checks: Record<string, unknown> = {}
   let allOk = true
 
   // 1. Database check + latency + error count + log size
@@ -105,10 +105,10 @@ export async function GET() {
     // Price feed offline is non-critical — app uses synthetic fallback
   }
 
-  // 7. MT5-bridge mini-service check (port 3002)
+  // 7. MT5-bridge mini-service check (port 3050)
   try {
     const bridgeMiniStart = Date.now()
-    const bridgeMiniRes = await fetch('http://localhost:3002/health', { signal: AbortSignal.timeout(3000) })
+    const bridgeMiniRes = await fetch('http://localhost:3050/health', { signal: AbortSignal.timeout(3000) })
     const bridgeMiniLatency = Date.now() - bridgeMiniStart
     checks.mt5BridgeMiniService = {
       status: bridgeMiniRes.ok ? 'ok' : 'error',

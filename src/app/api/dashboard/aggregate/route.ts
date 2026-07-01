@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { apiCatch } from '@/lib/api-handler'
+import { buildEquitySpark } from '@/lib/equity-spark'
 import { db } from '@/lib/db'
 import {
   SUPPORTED_SYMBOLS,
@@ -64,21 +65,6 @@ function buildSymbols(): SymbolQuote[] {
       spark,
       updatedAt: new Date(t).toISOString(),
     })
-  }
-  return out
-}
-
-function buildEquitySpark(balance: number, todayPnl: number): number[] {
-  // 40-point synthetic curve anchored at balance, drifting toward balance + todayPnl.
-  // Mirrors the pattern in src/app/api/dashboard/route.ts → buildEquitySpark.
-  const out: number[] = []
-  const start = balance - todayPnl * 0.5
-  const end = balance + todayPnl
-  for (let i = 0; i < 40; i++) {
-    const frac = i / 39
-    const lin = start + (end - start) * frac
-    const wobble = Math.sin(i / 3.1) * (balance * 0.0008)
-    out.push(Number((lin + wobble).toFixed(2)))
   }
   return out
 }

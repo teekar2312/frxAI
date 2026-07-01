@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { logCreateSchema, validateBody } from '@/lib/validations'
+import { requireAdmin } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,9 +43,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json().catch(() => ({}))
-    const parsed = validateBody(logCreateSchema, body)
-    if (parsed.error) return parsed.error
-    const { level, source, message, stack, context } = parsed.data
+    const validated = validateBody(logCreateSchema, body)
+    if (!validated.success) return NextResponse.json(validated.error, { status: validated.error.status })
+    const { level, source, message, stack, context } = validated.data
 
     const log = await db.log.create({
       data: {
@@ -62,6 +63,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const user = await requireAdmin()
+  if (user instanceof NextResponse) return user
+
   const limited = applyRateLimit(req, RATE_LIMITS.logPurge)
   if (limited) return limited
 

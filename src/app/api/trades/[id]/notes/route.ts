@@ -4,6 +4,7 @@ import { logInfo } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { tradeNotesSchema, validateBody } from '@/lib/validations'
+import { requireAuth } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +17,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await requireAuth()
+  if (user instanceof NextResponse) return user
+
   const limited = applyRateLimit(req, RATE_LIMITS.tradeNote)
   if (limited) return limited
 

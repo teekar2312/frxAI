@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { tradeUpdateSchema, validateBody } from '@/lib/validations'
+import { requireTrader } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +11,9 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await requireTrader()
+  if (user instanceof NextResponse) return user
+
   const limited = applyRateLimit(req, RATE_LIMITS.general)
   if (limited) return limited
 

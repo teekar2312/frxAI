@@ -21,8 +21,8 @@ export interface Account {
   marginLevel: number
   connected: boolean
   isDefault: boolean
-  createdAt: string
-  updatedAt: string
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export interface Trade {
@@ -46,10 +46,10 @@ export interface Trade {
   timeframe: string
   source: TradeSource
   comment: string | null
-  openTime: string
-  closeTime: string | null
-  createdAt: string
-  updatedAt: string
+  openTime: string | Date
+  closeTime: string | Date | null
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export interface PendingOrder {
@@ -63,9 +63,9 @@ export interface PendingOrder {
   stopLoss: number | null
   takeProfit: number | null
   status: 'pending' | 'triggered' | 'cancelled'
-  openTime: string
-  createdAt: string
-  updatedAt: string
+  openTime: string | Date
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export interface Indicator {
@@ -78,8 +78,8 @@ export interface Indicator {
   enabled: boolean
   autoManaged: boolean
   weight: number
-  createdAt: string
-  updatedAt: string
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export type NewsCategory =
@@ -97,8 +97,8 @@ export interface NewsItem {
   impact: 'low' | 'medium' | 'high'
   sentiment: 'bullish' | 'bearish' | 'neutral'
   symbols: string
-  publishedAt: string
-  createdAt: string
+  publishedAt: string | Date
+  createdAt: string | Date
 }
 
 export interface Alert {
@@ -108,11 +108,11 @@ export interface Alert {
   price: number
   active: boolean
   triggered: boolean
-  triggeredAt: string | null
+  triggeredAt: string | Date | null
   notifyEmail: boolean
   message: string | null
-  createdAt: string
-  updatedAt: string
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 export interface Log {
@@ -122,7 +122,7 @@ export interface Log {
   message: string
   stack: string | null
   context: string | null
-  createdAt: string
+  createdAt: string | Date
 }
 
 export interface Backtest {
@@ -146,7 +146,7 @@ export interface Backtest {
   equityCurve: string // JSON array
   tradesJson: string // JSON array
   status: 'running' | 'completed' | 'failed'
-  createdAt: string
+  createdAt: string | Date
 }
 
 export interface AiSignal {
@@ -161,7 +161,7 @@ export interface AiSignal {
   action: 'buy' | 'sell' | 'wait'
   modelVersion: string
   accuracy: number
-  createdAt: string
+  createdAt: string | Date
 }
 
 export interface TradingSession {
@@ -206,8 +206,8 @@ export interface Notification {
   body: string
   recipient: string
   sent: boolean
-  sentAt: string | null
-  createdAt: string
+  sentAt: string | Date | null
+  createdAt: string | Date
 }
 
 export interface DashboardData {
@@ -223,6 +223,21 @@ export interface DashboardData {
   latestSignals: AiSignal[]
   equitySpark: number[]
   symbols: SymbolQuote[]
+  mt5?: {
+    bridgeOnline: boolean
+    adapter: string | null
+    isLive: boolean
+    liveAccount: {
+      login: number
+      server: string
+      currency: string
+      balance: number
+      equity: number
+      margin: number
+      freeMargin: number
+      leverage: number
+    } | null
+  }
 }
 
 // ===== Economic Calendar =====
@@ -233,7 +248,7 @@ export interface EconomicEvent {
   currency: string // USD | EUR | GBP | JPY
   category: 'interest_rate' | 'nfp' | 'cpi' | 'ppi' | 'gdp' | 'unemployment' | 'retail' | 'pmi' | 'speech' | 'other'
   impact: 'low' | 'medium' | 'high'
-  eventTime: string
+  eventTime: string | Date
   actual: string | null
   forecast: string | null
   previous: string | null
@@ -241,8 +256,8 @@ export interface EconomicEvent {
   symbols: string
   status: 'upcoming' | 'released' | 'cancelled'
   source: string
-  createdAt: string
-  updatedAt: string
+  createdAt: string | Date
+  updatedAt: string | Date
 }
 
 // ===== Trade Analytics =====
@@ -289,8 +304,8 @@ export interface SafeUser {
   name: string
   role: 'admin' | 'trader' | 'viewer'
   active: boolean
-  lastLoginAt: string | null
-  createdAt: string
+  lastLoginAt: string | Date | null
+  createdAt: string | Date
 }
 
 // ===== MT5 Bridge =====

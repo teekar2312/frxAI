@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireServiceAuth } from '@/lib/service-auth'
 import { db } from '@/lib/db'
 import { bidAsk, calcPnl } from '@/lib/market'
+import { SYMBOL_BASE } from '@/lib/types'
 import { logInfo, sendNotification } from '@/lib/logger'
 import { sendWebhook } from '@/lib/webhook'
 import { atomicCloseTrade } from '@/lib/db-transactions'
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic'
 // manual close happened between the fetch and the update). Returns a summary
 // of actions taken.
 export async function POST(req: NextRequest) {
-  const authErr = requireServiceAuth(req as any)
+  const authErr = requireServiceAuth(req)
   if (authErr) return authErr
 
   const closed: any[] = []
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
 
       // ── Trailing stop: move SL as price moves favorably ──
       if (trade.trailingStop && trade.stopLoss) {
-        const pip = trade.symbol === 'USDJPY' ? 0.01 : trade.symbol === 'XAUUSD' ? 0.1 : 0.0001
+        const pip = SYMBOL_BASE[trade.symbol]?.pip ?? 0.0001
         const trailDist = trade.trailingPips * pip
         let newSl: number | null = null
 

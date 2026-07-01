@@ -5,6 +5,7 @@ import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateBody, riskSettingsSchema } from '@/lib/validations'
 import { auditRisk } from '@/lib/audit'
+import { requireAdmin } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  const user = await requireAdmin()
+  if (user instanceof NextResponse) return user
+
   // Rate limit
   const limited = applyRateLimit(req, RATE_LIMITS.riskUpdate)
   if (limited) return limited
@@ -38,21 +42,21 @@ export async function PATCH(req: NextRequest) {
     }
 
     const keys = Object.keys(validated.data.settings)
-    for (const key of keys) {
-      // Fetch old value for audit
-      const existing = await db.riskSetting.findUnique({ where: { key } })
-      const oldValue = existing?.value || ''
-      const newValue = String(validated.data.settings[key])
+    await db.$transaction(async (tx) => {
+      for (const key of keys) {
+        const existing = await tx.riskSetting.findUnique({ where: { key } })
+        const oldValue = existing?.value || ''
+        const newValue = String(validated.data.settings[key])
 
-      await db.riskSetting.upsert({
-        where: { key },
-        create: { key, value: newValue },
-        update: { value: newValue },
-      })
+        await tx.riskSetting.upsert({
+          where: { key },
+          create: { key, value: newValue },
+          update: { value: newValue },
+        })
 
-      // Audit each setting change
-      await auditRisk.settingChange(key, oldValue, newValue, 'system')
-    }
+        await auditRisk.settingChange(key, oldValue, newValue, 'system')
+      }
+    })
 
     const rows = await db.riskSetting.findMany()
     const settings: Record<string, string> = {}

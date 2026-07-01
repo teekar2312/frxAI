@@ -4,6 +4,7 @@ import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { validateBody, systemConfigSchema } from '@/lib/validations'
 import { audit } from '@/lib/audit'
+import { requireAdmin } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  const user = await requireAdmin()
+  if (user instanceof NextResponse) return user
+
   // Rate limit
   const limited = applyRateLimit(req, RATE_LIMITS.systemConfigUpdate)
   if (limited) return limited
@@ -26,36 +30,41 @@ export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
 
-    // Zod validation
     const validated = validateBody(systemConfigSchema, body)
     if (!validated.success) {
       return NextResponse.json(validated.error, { status: validated.error.status })
     }
 
     const incoming = validated.data.config
-
-    // Audit each config change
     const entries = Object.entries(incoming)
-    for (const [key, value] of entries) {
-      const existing = await db.systemConfig.findUnique({ where: { key } })
-      const oldValue = existing?.value || ''
 
+    // Collect old values BEFORE write (for audit diff)
+    const oldValues: Record<string, string> = {}
+    for (const [key] of entries) {
+      const existing = await db.systemConfig.findUnique({ where: { key } })
+      oldValues[key] = existing?.value || ''
+    }
+
+    // Perform all upserts in a transaction
+    await db.$transaction(
+      entries.map(([key, value]) =>
+        db.systemConfig.upsert({
+          where: { key },
+          update: { value: String(value) },
+          create: { key, value: String(value) },
+        }),
+      ),
+    )
+
+    // Audit AFTER successful write
+    for (const [key, value] of entries) {
       await audit({
         action: 'system.config-change',
         resource: key,
         resourceType: 'system-config',
-        details: { oldValue, newValue: value },
+        details: { oldValue: oldValues[key], newValue: value },
       })
     }
-
-    const ops = entries.map(([key, value]) =>
-      db.systemConfig.upsert({
-        where: { key },
-        update: { value: String(value) },
-        create: { key, value: String(value) },
-      }),
-    )
-    await Promise.all(ops)
 
     const rows = await db.systemConfig.findMany()
     const config: Record<string, string> = {}

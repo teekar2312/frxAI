@@ -6,6 +6,7 @@
 //   3. Consistency (if any write fails, all roll back)
 
 import 'server-only'
+import type { Trade, Account } from '@prisma/client'
 import { db } from './db'
 import { logInfo } from './logger'
 
@@ -30,7 +31,7 @@ export async function atomicCloseTrade(
   },
 ): Promise<
   | { alreadyClosed: true; trade: null; account: null }
-  | { alreadyClosed: false; trade: any; account: any }
+  | { alreadyClosed: false; trade: Trade; account: Account | null }
 > {
   return db.$transaction(async (tx) => {
     // Conditional update: only succeeds if status is still 'open'.
@@ -65,13 +66,16 @@ export async function atomicCloseTrade(
     if (account) {
       const newBalance = Number((account.balance + params.pnl).toFixed(2))
       const newEquity = Number(newBalance.toFixed(2))
+      const marginFreed = Math.max(0, trade.lotSize * 1000)
+      const newMargin = Math.max(0, account.margin - marginFreed)
+      const newFreeMargin = Number((newEquity - newMargin).toFixed(2))
       const updated = await tx.account.update({
         where: { id: account.id },
         data: {
           balance: newBalance,
           equity: newEquity,
-          freeMargin: newEquity,
-          margin: { decrement: Math.max(0, trade.lotSize * 1000) },
+          freeMargin: newFreeMargin,
+          margin: { decrement: marginFreed },
         },
       })
       return { alreadyClosed: false as const, trade, account: updated }
@@ -106,7 +110,7 @@ export async function atomicPartialCloseTrade(
   },
 ): Promise<
   | { alreadyClosed: true; closedTrade: null; remainingTrade: null; account: null }
-  | { alreadyClosed: false; closedTrade: any; remainingTrade: any; account: any }
+  | { alreadyClosed: false; closedTrade: Trade; remainingTrade: Trade | null; account: Account | null }
 > {
   return db.$transaction(async (tx) => {
     // Lock the trade row by fetching it first (SQLite doesn't have SELECT FOR UPDATE,
@@ -159,7 +163,7 @@ export async function atomicPartialCloseTrade(
     })
 
     // 2. Either fully close OR reduce the original trade's lot size.
-    let remainingTrade: any
+    let remainingTrade: Trade | null = null
     if (params.remainingLot < 0.01) {
       // Fully close — conditional update prevents double-close.
       const result = await tx.trade.updateMany({
@@ -177,7 +181,8 @@ export async function atomicPartialCloseTrade(
       }
       remainingTrade = await tx.trade.findUnique({ where: { id: tradeId } })
     } else {
-      // Reduce lot size + decrement commission.
+      // Reduce lot size + decrement commission + free up margin for closed portion.
+      const marginToFree = params.closeLot * 1000
       remainingTrade = await tx.trade.update({
         where: { id: tradeId },
         data: {
@@ -185,19 +190,31 @@ export async function atomicPartialCloseTrade(
           commission: { decrement: params.commission },
         },
       })
+      // Free margin for the closed portion
+      if (trade.account) {
+        await tx.account.update({
+          where: { id: trade.accountId },
+          data: {
+            margin: { decrement: marginToFree },
+            freeMargin: { increment: marginToFree },
+          },
+        })
+      }
     }
 
     // 3. Update account balance.
-    let account: any = null
+    let account: Account | null = null
     if (trade.account) {
       const newBalance = Number((trade.account.balance + params.pnl).toFixed(2))
       const newEquity = Number(newBalance.toFixed(2))
+      const remainingMargin = Math.max(0, (trade.account.margin || 0) - (params.closeLot * 1000))
+      const newFreeMargin = Number((newEquity - remainingMargin).toFixed(2))
       account = await tx.account.update({
         where: { id: trade.accountId },
         data: {
           balance: newBalance,
           equity: newEquity,
-          freeMargin: newEquity,
+          freeMargin: newFreeMargin,
         },
       })
     }
@@ -208,40 +225,6 @@ export async function atomicPartialCloseTrade(
       remainingTrade,
       account,
     }
-  })
-}
-
-/**
- * Atomically open a trade: create the trade record + log.
- * Currently a single write, but wrapped in transaction for future-proofing
- * (e.g., when we add risk enforcement checks that modify account state).
- */
-export async function atomicOpenTrade(
-  tradeData: any,
-): Promise<any> {
-  return db.$transaction(async (tx) => {
-    const trade = await tx.trade.create({ data: tradeData })
-    return trade
-  })
-}
-
-/**
- * Atomically create an account with its first trade (if provided).
- * Used by the auto-trader to ensure account + trade are created together.
- */
-export async function atomicCreateAccountWithTrade(
-  accountData: any,
-  tradeData?: any,
-): Promise<{ account: any; trade: any | null }> {
-  return db.$transaction(async (tx) => {
-    const account = await tx.account.create({ data: accountData })
-    let trade: any = null
-    if (tradeData) {
-      trade = await tx.trade.create({
-        data: { ...tradeData, accountId: account.id },
-      })
-    }
-    return { account, trade }
   })
 }
 

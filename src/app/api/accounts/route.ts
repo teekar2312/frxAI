@@ -5,6 +5,7 @@ import { accountCreateSchema, validateBody } from '@/lib/validations'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { auditAccount } from '@/lib/audit'
+import { requireAdmin } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await requireAdmin()
+  if (user instanceof NextResponse) return user
+
   const limited = applyRateLimit(req, RATE_LIMITS.accountCreate)
   if (limited) return limited
 

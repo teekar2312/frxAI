@@ -49,8 +49,11 @@ export async function PATCH(
       'currency', 'leverage', 'balance', 'equity', 'margin',
       'freeMargin', 'marginLevel', 'connected', 'isDefault',
     ]
+    const numericFields = new Set(['balance', 'equity', 'margin', 'freeMargin', 'marginLevel'])
     for (const key of allowed) {
-      if (key in body) data[key] = body[key]
+      if (key in body) {
+        data[key] = numericFields.has(key) ? Number(body[key]) : body[key]
+      }
     }
 
     const account = await db.account.update({ where: { id }, data })

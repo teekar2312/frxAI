@@ -6,12 +6,14 @@ import {
   type SymbolQuote,
   type DashboardData,
   type TradingSession,
+  type Trade,
 } from '@/lib/types'
 import { bidAsk, sparkline, dayHighLow, changePct24h, priceAt } from '@/lib/market'
 import { getSessions, getOverlap } from '@/lib/sessions'
 import { computeRiskUsage } from '@/lib/risk-usage'
 import { bridgeHealth, getTick, getAccountInfo } from '@/lib/mt5-client'
 import { apiCatch } from '@/lib/api-handler'
+import { buildEquitySpark } from '@/lib/equity-spark'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,20 +73,6 @@ async function buildSymbols(): Promise<SymbolQuote[]> {
   return out
 }
 
-function buildEquitySpark(balance: number, todayPnl: number): number[] {
-  // 40-point synthetic curve anchored at balance, drifting toward balance + todayPnl.
-  const out: number[] = []
-  const start = balance - todayPnl * 0.5
-  const end = balance + todayPnl
-  for (let i = 0; i < 40; i++) {
-    const frac = i / 39
-    const lin = start + (end - start) * frac
-    const wobble = Math.sin(i / 3.1) * (balance * 0.0008)
-    out.push(Number((lin + wobble).toFixed(2)))
-  }
-  return out
-}
-
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -97,8 +85,8 @@ export async function GET(req: NextRequest) {
       || accounts[0]
       || null
 
-    let openTrades: any[] = []
-    let todayClosedTrades: any[] = []
+    let openTrades: Trade[] = []
+    let todayClosedTrades: Trade[] = []
     let todayPnl = 0
     let todayPnlPct = 0
 
@@ -159,19 +147,18 @@ export async function GET(req: NextRequest) {
     }
 
     const payload: DashboardData = {
-      accounts: accounts as any,
-      defaultAccount: (defaultAccount as any) ?? null,
-      openTrades: openTrades as any,
-      todayClosedTrades: todayClosedTrades as any,
+      accounts: accounts,
+      defaultAccount: defaultAccount ?? null,
+      openTrades: openTrades,
+      todayClosedTrades: todayClosedTrades,
       todayPnl: Number(todayPnl.toFixed(2)),
       todayPnlPct: Number(todayPnlPct.toFixed(2)),
       riskUsage,
       sessions,
-      topNews: topNews as any,
-      latestSignals: latestSignals as any,
+      topNews: topNews,
+      latestSignals: latestSignals,
       equitySpark,
       symbols,
-      // @ts-expect-error — mt5 fields added in r10, not yet in DashboardData type
       mt5: {
         bridgeOnline: mt5Health.ok,
         adapter: mt5Health.adapter,

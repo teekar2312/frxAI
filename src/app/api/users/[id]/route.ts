@@ -26,7 +26,7 @@ export async function PATCH(
     const { id } = await params
     const body = await req.json()
     const parsed = validateBody(userUpdateSchema, body)
-    if (parsed.error) return parsed.error
+    if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
     const updates = parsed.data
 
     // Prevent admin from deactivating themselves
@@ -66,7 +66,7 @@ export async function POST(
     const { id } = await params
     const body = await req.json()
     const parsed = validateBody(passwordResetSchema, body)
-    if (parsed.error) return parsed.error
+    if (!parsed.success) return NextResponse.json(parsed.error, { status: parsed.error.status })
     const { password } = parsed.data
 
     await resetUserPassword(id, password)

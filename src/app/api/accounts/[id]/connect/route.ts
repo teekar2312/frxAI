@@ -4,6 +4,7 @@ import { logInfo, logWarn } from '@/lib/logger'
 import { apiCatch } from '@/lib/api-handler'
 import { applyRateLimit, RATE_LIMITS } from '@/lib/rate-limit'
 import { auditAccount } from '@/lib/audit'
+import { requireTrader } from '@/lib/auth-server'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,9 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const user = await requireTrader()
+  if (user instanceof NextResponse) return user
+
   const limited = applyRateLimit(req, RATE_LIMITS.general)
   if (limited) return limited
 
